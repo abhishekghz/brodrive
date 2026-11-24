@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 72" role="img" aria-label="BroDrive">
+  <g transform="translate(4 4)">
+    <rect width="64" height="64" rx="16" fill="#FFB703"/>
+    <path d="M28 15h11.5a8.5 8.5 0 0 1 0 17H28zM28 32h13.5a8.5 8.5 0 0 1 0 17H28z" fill="none" stroke="#0B0F17" stroke-width="6.5" stroke-linejoin="round"/>
+    <path d="M10 24h8M7 32h11M10 40h8" stroke="#0B0F17" stroke-width="4" stroke-linecap="round"/>
+  </g>
+  <text x="84" y="50" font-family="Outfit, 'Arial Black', Arial, sans-serif" font-size="40" font-weight="800" letter-spacing="-1" fill="#0B0F17">Bro<tspan fill="#FB8500">Drive</tspan></text>
+</svg>

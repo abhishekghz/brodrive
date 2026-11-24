@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en-IN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BroDrive Admin</title>
+<meta name="robots" content="noindex, nofollow">
+<meta name="theme-color" content="#0B0F17">
+<link rel="icon" href="../assets/img/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/img/apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../assets/css/style.css">
+<link rel="stylesheet" href="../assets/css/admin.css">
+</head>
+<body class="admin">
+<header class="site-header"><div class="container hdr">
+  <a class="brand" href="../" aria-label="BroDrive website"><svg viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="16" fill="#FFB703"/><path d="M28 15h11.5a8.5 8.5 0 0 1 0 17H28zM28 32h13.5a8.5 8.5 0 0 1 0 17H28z" fill="none" stroke="#0B0F17" stroke-width="6.5" stroke-linejoin="round"/><path d="M10 24h8M7 32h11M10 40h8" stroke="#0B0F17" stroke-width="4" stroke-linecap="round"/></svg><span class="brand-word">Bro<b>Drive</b></span><span class="adm-badge">Admin</span></a>
+  <nav class="adm-tabs" aria-label="Admin sections" hidden>
+    <button type="button" data-view="bookings" aria-current="page">Bookings <span class="count" data-new-count></span></button>
+    <button type="button" data-view="vehicles">Vehicles</button>
+    <button type="button" data-view="rules">Pricing rules</button>
+  </nav>
+  <button type="button" class="btn btn-ghost btn-sm adm-logout" data-logout hidden>Log out</button>
+</div></header>
+
+<main class="container adm-main">
+  <!-- Login -->
+  <section class="adm-login" data-section="login">
+    <form class="adm-card" data-login>
+      <h1>Admin login</h1>
+      <p class="muted">Bookings, vehicles and prices for BroDrive.</p>
+      <div class="adm-warn" data-no-api hidden>The booking system isn't connected yet. Follow <b>“Connect bookings &amp; email”</b> in the README, then add the Web App URL to <code>tools/build.py</code>.</div>
+      <label class="fld"><span>Admin password</span><input type="password" name="key" autocomplete="current-password" required></label>
+      <label class="chk"><input type="checkbox" name="remember"> Keep me signed in on this device</label>
+      <p class="book-error" data-login-error role="alert"></p>
+      <button type="submit" class="btn btn-primary" style="width:100%">Log in</button>
+    </form>
+  </section>
+
+  <!-- Bookings -->
+  <section data-section="bookings" hidden>
+    <div class="adm-head">
+      <div><h1>Bookings</h1><p class="muted" data-updated></p></div>
+      <div class="adm-head-actions"><a class="btn btn-ghost btn-sm" data-sheet target="_blank" rel="noopener">Open Google Sheet</a><button type="button" class="btn btn-dark btn-sm" data-refresh>Refresh</button></div>
+    </div>
+    <div class="stats" data-stats></div>
+    <div class="toolbar">
+      <div class="chipbar" data-status-filter role="tablist" aria-label="Filter by status"></div>
+      <div class="toolbar-right">
+        <select data-service-filter aria-label="Service"><option value="">All services</option><option>Cab with driver</option><option>Self drive</option></select>
+        <input type="search" data-search placeholder="Search name, mobile, ID, place…" aria-label="Search bookings">
+      </div>
+    </div>
+    <div class="table-wrap adm-table"><table>
+      <thead><tr><th>Booking</th><th>Customer</th><th>Service</th><th>Trip / car</th><th>Pickup time</th><th class="num">Fare</th><th>Status</th></tr></thead>
+      <tbody data-bookings></tbody>
+    </table></div>
+    <p class="empty" data-bookings-empty hidden>No bookings match.</p>
+  </section>
+
+  <!-- Vehicles -->
+  <section data-section="vehicles" hidden>
+    <div class="adm-head">
+      <div><h1>Vehicles</h1><p class="muted">Add, edit, hide or remove vehicles. Changes reach the booking form instantly and the website’s price lists within about an hour.</p></div>
+      <div class="adm-head-actions"><button type="button" class="btn btn-primary btn-sm" data-add-vehicle>+ Add vehicle</button></div>
+    </div>
+    <div class="seg adm-seg" role="radiogroup" aria-label="Vehicle type">
+      <label><input type="radio" name="vtype" value="cab" checked><span>Cab with driver</span></label>
+      <label><input type="radio" name="vtype" value="self"><span>Self drive</span></label>
+    </div>
+    <div class="vgrid" data-vehicles></div>
+  </section>
+
+  <!-- Rules -->
+  <section data-section="rules" hidden>
+    <div class="adm-head"><div><h1>Pricing rules</h1><p class="muted">Minimum km, allowances, discounts and fees used by the fare calculator and in booking emails.</p></div></div>
+    <form data-rules-form class="rules-form"></form>
+  </section>
+</main>
+
+<!-- Booking dialog -->
+<dialog class="adm-dialog" data-booking-dialog>
+  <form method="dialog" class="dlg-inner" data-booking-form>
+    <div class="dlg-head"><div><h2 data-b-title></h2><p class="muted" data-b-sub></p></div><button class="dlg-x" value="cancel" aria-label="Close">×</button></div>
+    <div class="quick" data-b-quick></div>
+    <div class="dlg-grid">
+      <div><h3>Details</h3><dl class="kv" data-b-details></dl></div>
+      <div>
+        <h3>Update booking</h3>
+        <div class="grid2">
+          <label class="fld full"><span>Status</span><select name="status"></select></label>
+          <label class="fld"><span>Vehicle number</span><input name="vehicleNo" placeholder="CH01 AB 1234"></label>
+          <label class="fld"><span>Final fare (₹)</span><input name="finalFare" inputmode="numeric" placeholder="e.g. 3500"></label>
+          <label class="fld"><span>Driver name</span><input name="driverName"></label>
+          <label class="fld"><span>Driver phone</span><input name="driverPhone" inputmode="tel"></label>
+          <label class="fld full"><span>Internal notes</span><textarea name="adminNotes" rows="3"></textarea></label>
+        </div>
+        <p class="book-error" data-b-error role="alert"></p>
+        <div class="dlg-actions">
+          <button type="button" class="btn btn-primary" data-save="email">Save &amp; email customer</button>
+          <button type="button" class="btn btn-dark" data-save="quiet">Save</button>
+        </div>
+        <h3 style="margin-top:22px">History</h3><pre class="history" data-b-history></pre>
+      </div>
+    </div>
+  </form>
+</dialog>
+
+<!-- Vehicle dialog -->
+<dialog class="adm-dialog narrow" data-vehicle-dialog>
+  <form class="dlg-inner" data-vehicle-form>
+    <div class="dlg-head"><h2 data-v-title>Add vehicle</h2><button type="button" class="dlg-x" data-close aria-label="Close">×</button></div>
+    <div class="grid2" data-v-fields></div>
+    <p class="book-error" data-v-error role="alert"></p>
+    <div class="dlg-actions"><button type="submit" class="btn btn-primary">Save vehicle</button><button type="button" class="btn btn-ghost" data-close>Cancel</button></div>
+  </form>
+</dialog>
+
+<div class="toast" data-toast role="status" aria-live="polite"></div>
+
+<script src="../assets/js/rates.js"></script>
+<script src="../assets/js/fare.js"></script>
+<script src="../assets/js/admin.js" defer></script>
+</body>
+</html>

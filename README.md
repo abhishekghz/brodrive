@@ -10,7 +10,7 @@ All prices, phone numbers and page text live in **`tools/build.py`**. After any 
 python3 tools/build.py
 ```
 
-That rewrites every page, `assets/js/rates.js`, `sitemap.xml` and `robots.txt`. Commit and push to update the live site.
+That rewrites every page, `assets/js/rates.js`, `backend/Code.gs`, `sitemap.xml` and `robots.txt`. Once the booking system is connected, prices and vehicles are managed in the admin panel, and the values in `build.py` are only the starting defaults. Commit and push to update the live site.
 
 | What | Where in `tools/build.py` |
 |---|---|
@@ -22,11 +22,35 @@ That rewrites every page, `assets/js/rates.js`, `sitemap.xml` and `robots.txt`. 
 | City pages (Chandigarh, Panchkula, Mohali, ...) | `CITIES` |
 | Route pages (Chandigarh to Delhi, ...) | `ROUTES` |
 
-**Before you promote the site, replace the placeholder phone and WhatsApp number in `SITE`.**
 
-## Booking flow
+## Bookings, admin panel & email
 
-There's no backend. The booking form works out the fare in the browser, then opens WhatsApp with the trip details filled in, so every enquiry lands on the business WhatsApp.
+- **Website booking:** customers book on the site and get a booking ID straight away. The fare is calculated again on the server, so nobody can tamper with the price. WhatsApp stays available as a backup.
+- **Emails** come from your own Gmail through Google Apps Script:
+  - you get a "New booking" email for every booking
+  - the customer gets "Booking received" (when they enter an email)
+  - the customer gets "Booking confirmed / cancelled / completed" whenever you choose **Save & email customer** in the admin panel
+- **Admin panel:** `/admin/` (for example https://abhishekghz.github.io/brodrive/admin/). It shows:
+  - bookings, with status, assigned vehicle number, driver, final fare and notes, plus one-tap Call/WhatsApp to the customer
+  - vehicles (add, edit, hide, delete, set prices, works for cars or bikes)
+  - pricing rules (minimum km, allowances, discounts, fees)
+- **Data** lives in a Google Sheet, *"BroDrive – Bookings & Fleet"*, in your Google Drive. The backend creates it the first time it runs. The sheet doubles as a backup and as an Excel-style view.
+- **Price changes** reach the booking form straight away. The static pages (fleet cards, rate tables) rebuild every hour through GitHub Actions.
+
+Free Gmail can send about 100 emails a day through Apps Script. That covers roughly 40–50 bookings a day.
+
+### Connect bookings & email (one-time, about 5 minutes)
+
+1. Open https://script.google.com and click **New project**. Name it *BroDrive API*.
+2. Delete the sample code. Paste in the whole of [`backend/Code.gs`](backend/Code.gs) (on GitHub, use the **Raw** button, then select all and copy).
+3. Click the ⚙️ **Project Settings** icon. Under **Script properties**, click **Add script property**:
+   - Property `ADMIN_KEY`, value: the admin-panel password you want (make it long).
+   - Optional: `OWNER_EMAIL`, if booking alerts should go to a different address.
+4. Go back to the **Editor**. Pick `setup` in the function dropdown, then click **Run**. Google asks for permission: click **Review permissions**, choose your account, then **Advanced → Go to BroDrive API (unsafe) → Allow**. This screen shows because it's your own script, not a published app. It creates the Google Sheet and sends you a "connected" email.
+5. Click **Deploy → New deployment**. Choose the ⚙️ type **Web app**, set *Execute as* **Me** and *Who has access* **Anyone**, then click **Deploy**. Copy the **Web app URL** (it ends in `/exec`).
+6. Put that URL in `SITE["api_url"]` in `tools/build.py`, then run `python3 tools/build.py` and push. Or just send the URL to Claude.
+
+**Updating the backend later:** paste the new `backend/Code.gs`, then go to **Deploy → Manage deployments → ✏️ → Version: New version → Deploy**. The URL stays the same.
 
 ## Moving to GoDaddy
 

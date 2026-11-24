@@ -252,3 +252,20 @@ td small{color:var(--muted);display:block}
   .mbar .btn{padding:.8em .6em;font-size:.92rem}
   .mbar .btn-ghost{color:#fff;border-color:rgba(255,255,255,.3)}
 }
+
+/* On-site booking additions */
+.hp{position:absolute!important;left:-9999px;width:1px;height:1px;opacity:0}
+.linkish{background:none;border:0;padding:0;font:600 .88rem var(--font);color:var(--wa-2);cursor:pointer;text-decoration:underline;text-underline-offset:3px}
+.wa-alt{display:flex;align-items:center;gap:6px;margin:12px auto 0}
+.wa-alt svg{width:16px;height:16px}
+.book-error{color:var(--err);font-size:.9rem;font-weight:600;margin:0 0 10px}
+.book-error:empty{display:none}
+.book-error .linkish{color:var(--err)}
+.book-done{padding:28px 22px;text-align:center;outline:none}
+.book-done h3{font-size:1.5rem;margin:10px 0 6px}
+.book-done p{color:var(--muted)}
+.book-done .est-lines{text-align:left;background:var(--amber-soft);border:1px solid #F6DE9A;border-radius:14px;padding:12px 16px;margin:16px 0}
+.book-done .book-actions{grid-template-columns:1fr 1fr}
+.done-ic{width:58px;height:58px;border-radius:50%;background:var(--wa);color:#fff;font:800 1.8rem/58px var(--display);margin:0 auto}
+.car-ico img{max-height:66px;max-width:100%;object-fit:contain}
+.fld .req{color:var(--err)}

@@ -25,9 +25,11 @@ SITE = {
     "tagline": "Cab service & self-drive cars in Chandigarh",
     # Live URL, no trailing slash. After moving to GoDaddy change to e.g. "https://www.brodrive.in"
     "base_url": "https://abhishekghz.github.io/brodrive",
-    "phone_display": "+91 XXXXX XXXXX",   # shown on the site
-    "phone": "+910000000000",             # used for tel: links, format +91XXXXXXXXXX
-    "whatsapp": "910000000000",           # WhatsApp number, digits only with 91 prefix
+    "phone_display": "+91 62021 23608",   # shown on the site
+    "phone": "+916202123608",             # used for tel: links, format +91XXXXXXXXXX
+    "whatsapp": "916202123608",           # WhatsApp number, digits only with 91 prefix
+    # Booking API (Google Apps Script web app URL, ends in /exec). Empty = bookings go to WhatsApp only.
+    "api_url": "",
     "email": "",                          # optional, e.g. "book@brodrive.in"
     "street": "",                         # optional office address, e.g. "SCO 12, Sector 22-C"
     "city": "Chandigarh",
@@ -88,6 +90,31 @@ PLACES = [
 ]
 PLACES.sort(key=lambda p: p[1])
 
+# Snapshot of the defaults above (seeded into the booking API the first time it runs)
+import copy
+DEFAULTS = copy.deepcopy({"cab": CAB_CARS, "self": SELF_CARS, "rules": RULES})
+
+def load_live():
+    """If the booking API is connected, use the fleet & prices saved in the admin panel."""
+    if not SITE["api_url"]:
+        return
+    try:
+        import urllib.request
+        with urllib.request.urlopen(SITE["api_url"] + "?action=catalog", timeout=30) as r:
+            d = json.load(r)
+        if d.get("ok") and d.get("cab") and d.get("self"):
+            CAB_CARS[:] = d["cab"]; SELF_CARS[:] = d["self"]
+            RULES.update({k: v for k, v in d.get("rules", {}).items() if k in RULES})
+            print(f"Using live prices from admin panel ({len(CAB_CARS)} cab + {len(SELF_CARS)} self-drive vehicles)")
+    except Exception as ex:
+        print("Live prices unavailable, using defaults:", ex)
+
+load_live()
+# Cheapest / dearest values for "from ₹X" copy
+CHEAP_CAB = {"km": min(c["km"] for c in CAB_CARS), "local": {k: min(c["local"][k] for c in CAB_CARS) for k in ("4h", "8h")}}
+CHEAP_SELF = {k: min(c[k] for c in SELF_CARS) for k in ("day", "half", "xkm", "dep")}
+TOP_SELF = {k: max(c[k] for c in SELF_CARS) for k in ("day", "xkm", "dep")}
+
 
 # --------------------------------------------------------------------------------------
 # Fare helpers (mirror of assets/js/app.js)
@@ -115,8 +142,9 @@ def km_of(name):
     return dict(PLACES)[name]
 
 e = html.escape
-CAB = {c["id"]: c for c in CAB_CARS}
-SELF = {c["id"]: c for c in SELF_CARS}
+# Named lookups used in page copy; fall back to defaults if a vehicle was removed in the admin panel
+CAB = {**{c["id"]: c for c in DEFAULTS["cab"]}, **{c["id"]: c for c in CAB_CARS}}
+SELF = {**{c["id"]: c for c in DEFAULTS["self"]}, **{c["id"]: c for c in SELF_CARS}}
 
 
 # --------------------------------------------------------------------------------------
@@ -139,8 +167,15 @@ SPRITE = (
     '<rect x="108" y="22" width="7" height="16" rx="3" fill="#0B0F17"/><path fill="#0B0F17" opacity=".82" d="M45 11h17v11H38zM66 11h18v11H66z"/>' + WHEELS.format(a=28, b=90) + '</symbol>'
     '<symbol id="car-van" viewBox="0 0 120 52"><path fill="currentColor" d="M4 40v-9c0-3 1-5 3-7l12-14c2-2 4-3 7-3h83c4 0 7 3 7 7v26z"/>'
     '<path fill="#0B0F17" opacity=".82" d="M22 12h14v12H12zM40 12h16v12H40zM60 12h16v12H60zM80 12h16v12H80zM100 12h9v12h-9z"/>' + WHEELS.format(a=26, b=96) + '</symbol>'
+    '<symbol id="car-bike" viewBox="0 0 120 52"><circle cx="28" cy="38" r="11" fill="none" stroke="#0B0F17" stroke-width="5"/><circle cx="92" cy="38" r="11" fill="none" stroke="#0B0F17" stroke-width="5"/>'
+    '<path fill="currentColor" d="M40 34h28l10-14h10l-6-8h10l8 12-6 2-12 8H40c-4 0-6-2-6-4s2-4 6-4z"/><path fill="currentColor" d="M44 22h22l-4 10H40z"/><rect x="50" y="16" width="16" height="6" rx="3" fill="#0B0F17"/></symbol>'
     '</svg>'
 )
+
+def car_visual(c):
+    if c.get("image"):
+        return f'<img src="{e(c["image"])}" alt="{e(c["name"])}" loading="lazy">'
+    return car_svg(c.get("icon") or "sedan")
 
 def car_svg(icon, cls=""):
     return f'<svg class="{cls}" viewBox="0 0 120 52" aria-hidden="true"><use href="#car-{icon}"/></svg>'
@@ -242,11 +277,16 @@ def booking(tab="cab", from_city="Chandigarh", dest=None, cab_car="sedan", self_
       <label class="fld"><span>Pickup time</span><input type="time" name="time" value="09:00"></label>
       <label class="fld full" data-show="round"><span>Return date</span><input type="date" name="rdate"></label>
       <label class="fld full"><span>Car type</span><select name="car">{cab_opts}</select></label>
-      <label class="fld"><span>Your name</span><input name="name" autocomplete="name" placeholder="Name"></label>
-      <label class="fld"><span>Mobile</span><input type="tel" name="mobile" autocomplete="tel" inputmode="tel" placeholder="10-digit mobile"></label>
+      <label class="fld full"><span>Pickup address</span><input name="address" autocomplete="street-address" placeholder="House / sector / landmark"></label>
+      <label class="fld"><span>Your name *</span><input name="name" autocomplete="name" placeholder="Name" required></label>
+      <label class="fld"><span>Mobile *</span><input type="tel" name="mobile" autocomplete="tel" inputmode="tel" placeholder="10-digit mobile" required></label>
+      <label class="fld full"><span>Email (for booking confirmation)</span><input type="email" name="email" autocomplete="email" placeholder="you@example.com"></label>
+      <input class="hp" name="website" tabindex="-1" autocomplete="off" aria-hidden="true">
     </div>
     <div class="estimate" aria-live="polite"><p class="est-empty">Choose a destination to see your fare.</p></div>
-    <div class="book-actions"><button type="submit" class="btn btn-wa">{ICONS["wa"]}Book on WhatsApp</button><a class="btn btn-ghost" href="{tel()}" aria-label="Call BroDrive">{ICONS["phone"]}Call</a></div>
+    <p class="book-error" role="alert"></p>
+    <div class="book-actions"><button type="submit" class="btn btn-primary"><span data-submit-label>{"Confirm booking" if SITE["api_url"] else "Book on WhatsApp"}</span></button><a class="btn btn-ghost" href="{tel()}" aria-label="Call BroDrive">{ICONS["phone"]}Call</a></div>
+    <button type="button" class="linkish wa-alt{"" if SITE["api_url"] else " is-hidden"}" data-wa-alt>{ICONS["wa"]}Prefer WhatsApp? Send these details on WhatsApp</button>
     <p class="fineprint">Toll, parking, state entry tax &amp; {RULES["gst"]}% GST extra. Night driving (10 PM–6 AM) {inr(RULES["nightCharge"])}/night. Final fare confirmed on booking.</p>
   </form>
   <form class="book-pane" data-pane="self" hidden novalidate>
@@ -258,11 +298,16 @@ def booking(tab="cab", from_city="Chandigarh", dest=None, cab_car="sedan", self_
         <label class="chk"><input type="checkbox" name="delivery"> Doorstep delivery in Chandigarh ({inr(RULES["deliveryFee"])}, free on {RULES["freeDeliveryDays"]}+ days)</label>
         <label class="chk"><input type="checkbox" name="unlimited"> Unlimited km (+{RULES["unlimitedPct"]}%)</label>
       </div></div>
-      <label class="fld"><span>Your name</span><input name="name" autocomplete="name" placeholder="Name"></label>
-      <label class="fld"><span>Mobile</span><input type="tel" name="mobile" autocomplete="tel" inputmode="tel" placeholder="10-digit mobile"></label>
+      <label class="fld full"><span>Delivery address (if doorstep delivery)</span><input name="address" autocomplete="street-address" placeholder="House / sector, Chandigarh"></label>
+      <label class="fld"><span>Your name *</span><input name="name" autocomplete="name" placeholder="Name" required></label>
+      <label class="fld"><span>Mobile *</span><input type="tel" name="mobile" autocomplete="tel" inputmode="tel" placeholder="10-digit mobile" required></label>
+      <label class="fld full"><span>Email (for booking confirmation)</span><input type="email" name="email" autocomplete="email" placeholder="you@example.com"></label>
+      <input class="hp" name="website" tabindex="-1" autocomplete="off" aria-hidden="true">
     </div>
     <div class="estimate" aria-live="polite"><p class="est-empty">Pick your dates to see the fare.</p></div>
-    <div class="book-actions"><button type="submit" class="btn btn-wa">{ICONS["wa"]}Book on WhatsApp</button><a class="btn btn-ghost" href="{tel()}" aria-label="Call BroDrive">{ICONS["phone"]}Call</a></div>
+    <p class="book-error" role="alert"></p>
+    <div class="book-actions"><button type="submit" class="btn btn-primary"><span data-submit-label>{"Confirm booking" if SITE["api_url"] else "Book on WhatsApp"}</span></button><a class="btn btn-ghost" href="{tel()}" aria-label="Call BroDrive">{ICONS["phone"]}Call</a></div>
+    <button type="button" class="linkish wa-alt{"" if SITE["api_url"] else " is-hidden"}" data-wa-alt>{ICONS["wa"]}Prefer WhatsApp? Send these details on WhatsApp</button>
     <p class="fineprint">Pickup &amp; return in Chandigarh. Original driving licence + Aadhaar required. Fuel not included. Refundable deposit collected at pickup.</p>
   </form>
 </div>'''
@@ -272,7 +317,7 @@ def cab_cards(p, dest=None):
     for c in CAB_CARS:
         extra = f'<li>Chandigarh → {e(dest)} one way <b>{inr(oneway(c, km_of(dest)))}</b></li>' if dest else ""
         out.append(f'''<article class="car">
-  <div class="car-ico">{car_svg(c["icon"])}</div>
+  <div class="car-ico">{car_visual(c)}</div>
   <h3>{c["name"]}</h3><div class="models">{c["models"]} or similar</div>
   <div class="price">₹{c["km"]}<small>/km outstation</small></div>
   <ul class="specs">
@@ -290,7 +335,7 @@ def self_cards(p):
     out = []
     for c in SELF_CARS:
         out.append(f'''<article class="car">
-  <div class="car-ico">{car_svg(c["icon"])}</div>
+  <div class="car-ico">{car_visual(c)}</div>
   <h3>{c["name"]}</h3><div class="models">{c["models"]} or similar</div>
   <div class="price">{inr(c["day"])}<small>/24 hrs</small></div>
   <ul class="specs">
@@ -330,9 +375,9 @@ def business_schema():
         "areaServed": [{"@type": "City", "name": n} for n in ["Chandigarh", "Panchkula", "Mohali", "Zirakpur", "Kharar"]] +
                       [{"@type": "State", "name": n} for n in ["Punjab", "Haryana", "Himachal Pradesh"]],
         "hasOfferCatalog": {"@type": "OfferCatalog", "name": "BroDrive rides", "itemListElement": [
-            {"@type": "Offer", "itemOffered": {"@type": "Service", "name": "Self drive car rental in Chandigarh"}, "priceSpecification": {"@type": "UnitPriceSpecification", "price": SELF_CARS[0]["day"], "priceCurrency": "INR", "unitText": "DAY"}},
-            {"@type": "Offer", "itemOffered": {"@type": "TaxiService", "name": "Outstation cab with driver"}, "priceSpecification": {"@type": "UnitPriceSpecification", "price": CAB_CARS[0]["km"], "priceCurrency": "INR", "unitText": "KMT"}},
-            {"@type": "Offer", "itemOffered": {"@type": "TaxiService", "name": "Local cab 8 hrs / 80 km"}, "priceSpecification": {"@type": "UnitPriceSpecification", "price": CAB_CARS[0]["local"]["8h"], "priceCurrency": "INR"}},
+            {"@type": "Offer", "itemOffered": {"@type": "Service", "name": "Self drive car rental in Chandigarh"}, "priceSpecification": {"@type": "UnitPriceSpecification", "price": CHEAP_SELF["day"], "priceCurrency": "INR", "unitText": "DAY"}},
+            {"@type": "Offer", "itemOffered": {"@type": "TaxiService", "name": "Outstation cab with driver"}, "priceSpecification": {"@type": "UnitPriceSpecification", "price": CHEAP_CAB["km"], "priceCurrency": "INR", "unitText": "KMT"}},
+            {"@type": "Offer", "itemOffered": {"@type": "TaxiService", "name": "Local cab 8 hrs / 80 km"}, "priceSpecification": {"@type": "UnitPriceSpecification", "price": CHEAP_CAB["local"]["8h"], "priceCurrency": "INR"}},
         ]},
     }
     same = [x for x in [SITE["instagram"], SITE["facebook"]] if x]
@@ -382,6 +427,7 @@ def page(path, title, desc, body, schemas=(), og_type="website"):
 </main>
 {footer(p)}
 <script src="{p}assets/js/rates.js"></script>
+<script src="{p}assets/js/fare.js"></script>
 <script src="{p}assets/js/app.js" defer></script>
 </body>
 </html>
@@ -512,7 +558,7 @@ HOME_FAQS = [
     ("Is self-drive available outside Chandigarh?", f"Self-drive cars are picked up and returned in Chandigarh only, with optional doorstep delivery inside the city. Once you have the car you can drive to Punjab, Haryana or Himachal – just tell us your plan."),
     ("What documents do I need for a self-drive car?", "An original driving licence at least 1 year old, Aadhaar card, and one more ID (PAN/passport/voter ID). Minimum age is 21 (23–25 for premium SUVs). A refundable security deposit is collected at pickup."),
     ("When is the security deposit refunded?", "Within 3–7 working days after return, after deducting any fuel shortfall, traffic challans, late fees or damage as per our policy."),
-    ("What is the daily km limit on self-drive cars?", f"Each 24-hour day includes {RULES['selfKmPerDay']} km ({RULES['selfKmHalf']} km for a 12-hour rental). Extra km are ₹{SELF_CARS[0]['xkm']}–₹{SELF_CARS[-1]['xkm']}/km depending on the car, or choose the unlimited km add-on."),
+    ("What is the daily km limit on self-drive cars?", f"Each 24-hour day includes {RULES['selfKmPerDay']} km ({RULES['selfKmHalf']} km for a 12-hour rental). Extra km are ₹{CHEAP_SELF['xkm']}–₹{TOP_SELF['xkm']}/km depending on the car, or choose the unlimited km add-on."),
     ("What is your cancellation policy?", "Cabs: free cancellation up to 6 hours before pickup. Self drive: free up to 24 hours before pickup. See our policies page for details."),
 ]
 
@@ -569,10 +615,10 @@ def build_home():
   <div class="modes">
     <a class="mode dark" href="{p}car-rental-with-driver/"><h3>Cab with Driver</h3><p>Hatchbacks to Tempo Travellers with experienced drivers.</p>
       <ul><li>One way &amp; round trip outstation</li><li>Local 4 hr / 8 hr packages</li><li>Airport &amp; railway transfers</li></ul>
-      <span class="go">From ₹{CAB_CARS[0]["km"]}/km →</span>{car_svg("sedan", "car-art")}</a>
+      <span class="go">From ₹{CHEAP_CAB["km"]}/km →</span>{car_svg("sedan", "car-art")}</a>
     <a class="mode amber" href="{p}self-drive-car-rental-chandigarh/"><h3>Self Drive · Chandigarh</h3><p>Your car, your playlist, your pace.</p>
       <ul><li>Swift to Thar &amp; XUV700</li><li>{RULES["selfKmPerDay"]} km/day free, or go unlimited</li><li>Doorstep delivery in Chandigarh</li></ul>
-      <span class="go">From {inr(SELF_CARS[0]["day"])}/day →</span>{car_svg("jeep", "car-art")}</a>
+      <span class="go">From {inr(CHEAP_SELF["day"])}/day →</span>{car_svg("jeep", "car-art")}</a>
   </div>
 </div></section>
 
@@ -616,7 +662,7 @@ def build_home():
 </div></section>
 {cta(p)}'''
     page("", "BroDrive – Cab Service & Self Drive Car Rental in Chandigarh, Panchkula, Mohali",
-         f"Book cabs in Chandigarh, Panchkula & Mohali – one way & round trip outstation taxi from ₹{CAB_CARS[0]['km']}/km, local cabs, airport transfers. Self drive cars in Chandigarh from {inr(SELF_CARS[0]['day'])}/day. 24×7.",
+         f"Book cabs in Chandigarh, Panchkula & Mohali – one way & round trip outstation taxi from ₹{CHEAP_CAB['km']}/km, local cabs, airport transfers. Self drive cars in Chandigarh from {inr(CHEAP_SELF['day'])}/day. 24×7.",
          body, [faq_schema(HOME_FAQS), {"@context": "https://schema.org", "@type": "WebSite", "name": "BroDrive", "url": SITE["base_url"] + "/"}])
 
 def rate_tables(p, which="both"):
@@ -676,7 +722,7 @@ def build_self():
             ("Is there a 12-hour self-drive plan?", f"Yes – 12-hour rentals start at {inr(SELF['hatch']['half'])} with {RULES['selfKmHalf']} free km.")]
     def body(p):
         return hero_small(p, ["Self drive car rental Chandigarh"], "Self Drive Car Rental in <em>Chandigarh</em>",
-                          f"Swift to Thar, Creta to XUV700 – rent a self-drive car from {inr(SELF_CARS[0]['day'])}/day with {RULES['selfKmPerDay']} free km, insurance and doorstep delivery anywhere in Chandigarh.",
+                          f"Swift to Thar, Creta to XUV700 – rent a self-drive car from {inr(CHEAP_SELF['day'])}/day with {RULES['selfKmPerDay']} free km, insurance and doorstep delivery anywhere in Chandigarh.",
                           booking(tab="self")) + f'''
 <section><div class="container">
   <div class="sec-head"><span class="kicker">Choose your ride</span><h2>Self-drive cars &amp; daily rates</h2><p>Prices per 24 hours. 12-hour plans available. Pickup &amp; return in Chandigarh.</p></div>
@@ -695,8 +741,8 @@ def build_self():
     <ul><li>Original driving licence, at least 1 year old.</li><li>Aadhaar card + one more ID (PAN, passport or voter ID).</li><li>Minimum age 21 (23+ for SUVs, Thar and 7-seaters; 25+ for Innova Crysta).</li><li>Outstation students and tourists: additional local reference may be requested.</li></ul>
   </div>
   <aside class="aside-card"><h3>At a glance</h3><dl>
-    <dt>Starts at</dt><dd>{inr(SELF_CARS[0]["day"])}/day</dd><dt>Free km</dt><dd>{RULES["selfKmPerDay"]} km/day</dd>
-    <dt>Extra km</dt><dd>₹{SELF_CARS[0]["xkm"]}–₹{SELF_CARS[-1]["xkm"]}</dd><dt>Deposit</dt><dd>{inr(SELF_CARS[0]["dep"])}–{inr(SELF_CARS[-1]["dep"])}</dd>
+    <dt>Starts at</dt><dd>{inr(CHEAP_SELF["day"])}/day</dd><dt>Free km</dt><dd>{RULES["selfKmPerDay"]} km/day</dd>
+    <dt>Extra km</dt><dd>₹{CHEAP_SELF["xkm"]}–₹{TOP_SELF["xkm"]}</dd><dt>Deposit</dt><dd>{inr(CHEAP_SELF["dep"])}–{inr(TOP_SELF["dep"])}</dd>
     <dt>Delivery</dt><dd>{inr(RULES["deliveryFee"])} / free 3+ days</dd><dt>Late return</dt><dd>{inr(RULES["lateFeePerHour"])}/hr</dd></dl>
     <a class="btn btn-primary" href="#book" style="width:100%">Check availability</a></aside>
 </div></section>
@@ -704,7 +750,7 @@ def build_self():
 <section class="bg-white"><div class="container"><div class="sec-head"><h2>Self-drive FAQs</h2></div>{faq_html(faqs)}</div></section>
 {cta(p, "Keys in hand by tomorrow?", "Tell us the car and dates – we'll confirm availability on WhatsApp in minutes.")}'''
     page("self-drive-car-rental-chandigarh/", "Self Drive Car Rental in Chandigarh from ₹1,799/day | BroDrive",
-         f"Self drive cars in Chandigarh – Swift, Dzire, Creta, Thar, XUV700, Innova Crysta. From {inr(SELF_CARS[0]['day'])}/day, {RULES['selfKmPerDay']} km/day free, unlimited km option, doorstep delivery. Book on WhatsApp.",
+         f"Self drive cars in Chandigarh – Swift, Dzire, Creta, Thar, XUV700, Innova Crysta. From {inr(CHEAP_SELF['day'])}/day, {RULES['selfKmPerDay']} km/day free, unlimited km option, doorstep delivery. Book on WhatsApp.",
          body, [faq_schema(faqs), crumbs_schema([("Home", ""), ("Self drive car rental Chandigarh", "self-drive-car-rental-chandigarh/")])])
 
 def build_driver():
@@ -715,7 +761,7 @@ def build_driver():
             HOME_FAQS[7]]
     def body(p):
         return hero_small(p, ["Car rental with driver"], "Car Rental <em>with Driver</em> in Chandigarh",
-                          f"One-way drops, round trips and hourly local cabs from Chandigarh, Panchkula and Mohali to anywhere in Punjab, Haryana, Himachal and Delhi. From ₹{CAB_CARS[0]['km']}/km, driver included.",
+                          f"One-way drops, round trips and hourly local cabs from Chandigarh, Panchkula and Mohali to anywhere in Punjab, Haryana, Himachal and Delhi. From ₹{CHEAP_CAB['km']}/km, driver included.",
                           booking()) + f'''
 <section><div class="container">
   <div class="sec-head"><span class="kicker">Fleet</span><h2>Pick your cab</h2><p>All cars are AC, commercially insured and driven by verified professionals.</p></div>
@@ -726,7 +772,7 @@ def build_driver():
   <div class="features">
     <div class="feature" id="oneway"><div class="ic">{ICONS["spark"]}</div><h3>One Way</h3><p>Drop to Delhi, Shimla, Amritsar or any city and pay only for the distance travelled. Minimum {RULES["oneWayMinKm"]} km, plus one day driver allowance.</p></div>
     <div class="feature" id="round"><div class="ic">{ICONS["clock"]}</div><h3>Round Trip</h3><p>The cab stays with you for sightseeing and brings you home. Minimum {RULES["roundMinKmPerDay"]} km/day + {inr(CAB["sedan"]["da"])}/day driver allowance.</p></div>
-    <div class="feature" id="local"><div class="ic">{ICONS["tag"]}</div><h3>Local Hourly</h3><p>4 hrs / 40 km from {inr(CAB_CARS[0]["local"]["4h"])} or 8 hrs / 80 km from {inr(CAB_CARS[0]["local"]["8h"])} within the tricity – weddings, shopping, hospital visits.</p></div>
+    <div class="feature" id="local"><div class="ic">{ICONS["tag"]}</div><h3>Local Hourly</h3><p>4 hrs / 40 km from {inr(CHEAP_CAB["local"]["4h"])} or 8 hrs / 80 km from {inr(CHEAP_CAB["local"]["8h"])} within the tricity – weddings, shopping, hospital visits.</p></div>
   </div>
 </div></section>
 <section><div class="container">
@@ -745,7 +791,7 @@ def build_city(c):
         areas = "".join(f"<li>{e(a)}</li>" for a in c["areas"])
         intro = "".join(f"<p>{e(x)}</p>" for x in c["intro"])
         selfblock = f'''<section><div class="container"><div class="sec-head"><span class="kicker">Self drive · Chandigarh</span><h2>Self-drive cars in Chandigarh</h2><p>Doorstep delivery anywhere in the city.</p></div>{self_cards(p)}</div></section>''' if c["self_drive"] else \
-            f'''<section><div class="container"><div class="cta" style="background:#fff;border:1px solid var(--line)"><div><h2>Want to drive yourself?</h2><p>Self-drive cars from {inr(SELF_CARS[0]["day"])}/day are available for pickup in Chandigarh, just next door.</p></div><div class="btns"><a class="btn btn-primary" href="{p}self-drive-car-rental-chandigarh/">See self-drive cars</a></div></div></div></section>'''
+            f'''<section><div class="container"><div class="cta" style="background:#fff;border:1px solid var(--line)"><div><h2>Want to drive yourself?</h2><p>Self-drive cars from {inr(CHEAP_SELF["day"])}/day are available for pickup in Chandigarh, just next door.</p></div><div class="btns"><a class="btn btn-primary" href="{p}self-drive-car-rental-chandigarh/">See self-drive cars</a></div></div></div></section>'''
         from_city = "" if c.get("state") else c["name"]
         return hero_small(p, [c["h1"]], c["h1"].replace(c["name"], f"<em>{c['name']}</em>"),
                           c["desc"].split(". ")[0] + ".", booking(from_city=from_city)) + f'''
@@ -832,7 +878,7 @@ def build_404():
     PAGES.remove("404/")
 
 def build_assets():
-    data = {"site": {"whatsapp": SITE["whatsapp"], "phone": SITE["phone"]},
+    data = {"site": {"whatsapp": SITE["whatsapp"], "phone": SITE["phone"], "api": SITE["api_url"]},
             "rules": RULES, "cab": CAB_CARS, "self": SELF_CARS}
     with open(os.path.join(ROOT, "assets", "js", "rates.js"), "w", encoding="utf-8") as f:
         f.write("/* GENERATED by tools/build.py – edit prices there, not here. */\nwindow.BRO = " + json.dumps(data, ensure_ascii=False, indent=1) + ";\n")
@@ -841,11 +887,23 @@ def build_assets():
     with open(os.path.join(ROOT, "sitemap.xml"), "w", encoding="utf-8") as f:
         f.write(f'<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n{urls}</urlset>\n')
     with open(os.path.join(ROOT, "robots.txt"), "w", encoding="utf-8") as f:
-        f.write(f"User-agent: *\nAllow: /\n\nSitemap: {SITE['base_url']}/sitemap.xml\n")
+        f.write(f"User-agent: *\nAllow: /\nDisallow: /admin/\n\nSitemap: {SITE['base_url']}/sitemap.xml\n")
+
+def build_backend():
+    """backend/Code.gs = shared fare engine + API + default fleet. Paste this single file into Apps Script."""
+    fare = open(os.path.join(ROOT, "assets", "js", "fare.js"), encoding="utf-8").read()
+    server = open(os.path.join(ROOT, "backend", "server.js"), encoding="utf-8").read()
+    defaults = dict(DEFAULTS, phone=SITE["phone_display"])
+    out = ("/* GENERATED by tools/build.py – edit backend/server.js or assets/js/fare.js, then rebuild. */\n\n"
+           + server + "\n\n/* ---------- Shared fare engine (assets/js/fare.js) ---------- */\n" + fare
+           + "\n/* ---------- Default fleet & rules (seeded on first run) ---------- */\nvar DEFAULTS = "
+           + json.dumps(defaults, ensure_ascii=False, indent=1) + ";\n")
+    with open(os.path.join(ROOT, "backend", "Code.gs"), "w", encoding="utf-8") as f:
+        f.write(out)
 
 if __name__ == "__main__":
     build_home(); build_rates(); build_self(); build_driver()
     for c in CITIES: build_city(c)
     for r in ROUTES: build_route(r)
-    build_terms(); build_404(); build_assets()
+    build_terms(); build_404(); build_assets(); build_backend()
     print(f"Built {len(PAGES)} pages + 404.html, sitemap.xml, robots.txt, assets/js/rates.js")

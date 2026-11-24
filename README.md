@@ -35,7 +35,7 @@ That rewrites every page, `assets/js/rates.js`, `backend/Code.gs`, `sitemap.xml`
   - vehicles (add, edit, hide, delete, set prices, works for cars or bikes)
   - pricing rules (minimum km, allowances, discounts, fees)
 - **Data** lives in a Google Sheet, *"BroDrive – Bookings & Fleet"*, in your Google Drive. The backend creates it the first time it runs. The sheet doubles as a backup and as an Excel-style view.
-- **Price changes** reach the booking form straight away. The static pages (fleet cards, rate tables) rebuild every hour through GitHub Actions.
+- **Price changes** reach the booking form straight away. The static price lists (fleet cards, rate tables) update the next time `python3 tools/build.py` is run and pushed, because the build pulls live prices from the admin panel. `.github/workflows/pages.yml` can do this hourly, but it's disabled: GitHub Actions is blocked by a billing issue on the account. Once that's fixed, re-enable it with `gh workflow enable "Build & deploy website"` and set Settings → Pages → Source to *GitHub Actions*.
 
 Free Gmail can send about 100 emails a day through Apps Script. That covers roughly 40–50 bookings a day.
 

@@ -81,7 +81,7 @@
       <div class="stat"><span>Payout pending</span><b>${inr(t.pending)}</b></div>
       <div class="stat"><span>Rides completed</span><b>${t.completed}</b></div></div>`;
     h += '<h2 style="font-size:1.3rem;margin:22px 0 10px">Upcoming &amp; ongoing</h2>';
-    h += up.length ? '<div class="rides">' + up.map(r => `<article class="ride">
+    h += up.length ? '<div class="prides">' + up.map(r => `<article class="pride">
         <h3>${esc(r.start)} <span class="pill s-${esc(r.status.toLowerCase())}">${esc(r.tripStatus || r.status)}</span></h3>
         <div class="meta">${esc(r.id)} · ${esc(r.service)} – ${esc(r.trip)} · <span class="reg">${esc(r.vehicleNo)}</span></div>
         <div><b>Pickup:</b> ${esc(r.pickup)}${r.address ? ', ' + esc(r.address) : ''}${r.destination ? `<br><b>Drop:</b> ${esc(r.destination)}` : ''}</div>

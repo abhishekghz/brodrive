@@ -36,7 +36,7 @@
     if (!res) { box.innerHTML = '<p class="est-empty">' + esc(emptyMsg) + '</p>'; return; }
     if (res.error) { box.innerHTML = '<p class="est-err">' + esc(res.error) + '</p>'; return; }
     var li = res.lines.map(function (l) {
-      return '<li' + (l[2] ? ' class="' + l[2] + '"' : '') + '><span>' + esc(l[0]) + '</span><span>' + (l[1] < 0 ? '−' + inr(-l[1]) : inr(l[1])) + '</span></li>';
+      return '<li' + (l[2] ? ' class="' + l[2] + '"' : '') + '><span>' + esc(l[0]) + '</span><span>' + (l[1] === null ? '' : l[1] < 0 ? '\u2212' + inr(-l[1]) : inr(l[1])) + '</span></li>';
     }).join('');
     box.innerHTML = '<div class="est-total"><span>Estimated fare</span><strong>' + inr(res.total) + '</strong></div>' +
       '<ul class="est-lines">' + li + '</ul>' + (res.note ? '<p class="est-note">' + esc(res.note) + '</p>' : '');
@@ -111,6 +111,210 @@
     });
   }
 
+  /* ---------- City ride: map (OpenStreetMap + Leaflet), place search (Photon), road distance (OSRM) ---------- */
+  var CITY = { lat: 30.7333, lng: 76.7794, box: [76.55, 30.55, 77.05, 30.92] };
+  var leafletP = null;
+  function loadLeaflet() {
+    if (window.L) return Promise.resolve(window.L);
+    if (!leafletP) leafletP = new Promise(function (res, rej) {
+      var css = document.createElement('link'); css.rel = 'stylesheet';
+      css.href = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css'; document.head.appendChild(css);
+      var js = document.createElement('script'); js.src = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js';
+      js.onload = function () { res(window.L); }; js.onerror = rej; document.head.appendChild(js);
+    });
+    return leafletP;
+  }
+  function inBox(lat, lng) { return lng >= CITY.box[0] && lng <= CITY.box[2] && lat >= CITY.box[1] && lat <= CITY.box[3]; }
+  function hav(a, b) {
+    var r = Math.PI / 180, dLat = (b[0] - a[0]) * r, dLng = (b[1] - a[1]) * r;
+    var x = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(a[0] * r) * Math.cos(b[0] * r) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
+    return 12742 * Math.asin(Math.sqrt(x));
+  }
+  function placeName(ft) {
+    var pr = ft.properties || {};
+    var main = pr.name || [pr.housenumber, pr.street].filter(Boolean).join(' ') || pr.district || pr.city || 'Pinned location';
+    var sub = [pr.street && pr.name ? pr.street : '', pr.district || pr.locality, pr.city || pr.county]
+      .filter(function (x, i, a) { return x && x !== main && a.indexOf(x) === i; }).join(', ');
+    return main + (sub ? ', ' + sub : '');
+  }
+  function reverseGeo(lat, lng) {
+    return fetch('https://photon.komoot.io/reverse?lat=' + lat + '&lon=' + lng + '&lang=en').then(function (r) { return r.json(); })
+      .then(function (j) { return j.features && j.features[0] ? placeName(j.features[0]) : 'Pinned location'; })
+      .catch(function () { return 'Pinned location (' + lat.toFixed(4) + ', ' + lng.toFixed(4) + ')'; });
+  }
+
+  function initCity(root, f) {
+    var e = f.elements, mapEl = $('[data-map]', f), rides = $('[data-rides]', f), box = $('.estimate', f), err = $('.book-error', f);
+    var pts = { pickup: null, drop: null }, map = null, markers = {}, line = null, routeKm = 0, seq = 0;
+    var today = new Date(); e.date.value = dateStr(today); e.date.min = dateStr(today);
+    function val(n) { var x = f.querySelector('input[name=' + n + ']:checked'); return x ? x.value : ''; }
+    function showErr(m) { err.textContent = m; }
+    function cityCars() { return B.cab.filter(function (c) { return c.cityKm > 0; }); }
+
+    function renderRides() {
+      var cur = val('car') || 'hatch', list = cityCars();
+      rides.innerHTML = list.map(function (c) {
+        return '<label class="ride"><input type="radio" name="car" value="' + esc(c.id) + '"' + (c.id === cur ? ' checked' : '') + '>' +
+          '<svg viewBox="0 0 120 52" aria-hidden="true"><use href="#car-' + esc(c.icon || 'sedan') + '"/></svg>' +
+          '<span><b>' + esc(c.name) + '</b><small>' + esc(c.seats) + ' seats · ' + esc(c.models) + '</small></span><span class="rf" data-rf="' + esc(c.id) + '">—</span></label>';
+      }).join('');
+      if (!val('car') && list.length) rides.querySelector('input').checked = true;
+      calc();
+    }
+    function hour() {
+      if (val('when') === 'later') return +((e.time.value || '09:00').split(':')[0]);
+      return new Date(Date.now() + 20 * 6e4).getHours();
+    }
+    function calc() {
+      $$('[data-later]', f).forEach(function (el) { el.classList.toggle('is-hidden', val('when') !== 'later'); });
+      if (!(pts.pickup && pts.drop && routeKm > 0)) {
+        f._res = null; $$('[data-rf]', f).forEach(function (el) { el.textContent = '—'; });
+        return renderEstimate(box, null, 'Set pickup and drop to see your fare.');
+      }
+      if (routeKm > B.rules.cityMaxKm) {
+        f._res = { error: 'That’s ' + routeKm + ' km – longer than a city ride. Please use the Outstation tab.' };
+        return renderEstimate(box, f._res);
+      }
+      var h = hour();
+      cityCars().forEach(function (c) { var el = f.querySelector('[data-rf="' + c.id + '"]'); if (el) el.textContent = inr(F.city(c, routeKm, h, B.rules).total); });
+      var car = find(B.cab, val('car'));
+      f._res = F.city(car, routeKm, h, B.rules);
+      f._res.lines.unshift(['Distance ' + routeKm + ' km', null]);
+      renderEstimate(box, f._res);
+    }
+
+    function drawMarker(k) {
+      var L = window.L, p = pts[k];
+      if (!map || !p) return;
+      if (markers[k]) { markers[k].setLatLng([p.lat, p.lng]); return; }
+      markers[k] = L.marker([p.lat, p.lng], { draggable: true, keyboard: false,
+        icon: L.divIcon({ className: '', html: '<div class="pin ' + (k === 'pickup' ? 'a' : 'b') + '"></div>', iconSize: [26, 26], iconAnchor: [13, 26] }) }).addTo(map);
+      markers[k].on('dragend', function (ev) { var ll = ev.target.getLatLng(); setPoint(k, ll.lat, ll.lng, null); });
+    }
+    function fit() {
+      if (!map) return;
+      var ll = ['pickup', 'drop'].filter(function (k) { return pts[k]; }).map(function (k) { return [pts[k].lat, pts[k].lng]; });
+      if (ll.length === 2) map.fitBounds(ll, { padding: [36, 36], maxZoom: 15 }); else if (ll.length === 1) map.setView(ll[0], 14);
+    }
+    function route() {
+      fit();
+      if (line) { line.remove(); line = null; }
+      if (!(pts.pickup && pts.drop)) { routeKm = 0; return calc(); }
+      var id = ++seq, a = pts.pickup, b = pts.drop;
+      routeKm = Math.max(1, Math.round(hav([a.lat, a.lng], [b.lat, b.lng]) * 13.5) / 10); // provisional: straight line x1.35
+      calc();
+      fetch('https://router.project-osrm.org/route/v1/driving/' + a.lng + ',' + a.lat + ';' + b.lng + ',' + b.lat + '?overview=simplified&geometries=geojson')
+        .then(function (r) { return r.json(); })
+        .then(function (j) {
+          if (id !== seq || !j.routes || !j.routes[0]) return;
+          routeKm = Math.max(1, Math.round(j.routes[0].distance / 100) / 10);
+          if (map) line = window.L.geoJSON(j.routes[0].geometry, { style: { color: '#0B0F17', weight: 4, opacity: 0.75 } }).addTo(map);
+          calc();
+        }).catch(function () { /* keep the straight-line estimate */ });
+    }
+    function setPoint(k, lat, lng, label) {
+      if (!inBox(lat, lng)) { showErr('That spot is outside the tricity. For trips beyond Chandigarh, Mohali, Panchkula & Zirakpur, use the Outstation tab.'); return; }
+      showErr('');
+      pts[k] = { lat: Math.round(lat * 1e5) / 1e5, lng: Math.round(lng * 1e5) / 1e5 };
+      var mine = pts[k];
+      e[k].value = label || 'Finding address…';
+      if (!label) reverseGeo(lat, lng).then(function (n) { if (pts[k] === mine) e[k].value = n; });
+      drawMarker(k);
+      route();
+    }
+    function ensureMap() {
+      if (map) { map.invalidateSize(); return; }
+      if (f._mapLoading) return;
+      f._mapLoading = true;
+      loadLeaflet().then(function (L) {
+        mapEl.innerHTML = '';
+        map = L.map(mapEl, { scrollWheelZoom: false }).setView([CITY.lat, CITY.lng], 12);
+        L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>' }).addTo(map);
+        map.on('click', function (ev) { setPoint(!pts.pickup ? 'pickup' : 'drop', ev.latlng.lat, ev.latlng.lng, null); });
+        drawMarker('pickup'); drawMarker('drop'); route();
+      }).catch(function () { mapEl.innerHTML = '<p class="map-hint">Map unavailable – search for places below.</p>'; });
+    }
+    root._ensureMap = ensureMap;
+
+    ['pickup', 'drop'].forEach(function (k) {
+      var list = $('[data-sugg="' + k + '"]', f), t, q = 0;
+      e[k].addEventListener('input', function () {
+        pts[k] = null; if (markers[k]) { markers[k].remove(); markers[k] = null; } route();
+        clearTimeout(t);
+        t = setTimeout(function () {
+          var text = e[k].value.trim(), id = ++q;
+          if (text.length < 3) { list.innerHTML = ''; return; }
+          fetch('https://photon.komoot.io/api/?q=' + encodeURIComponent(text) + '&limit=6&lang=en&lat=' + CITY.lat + '&lon=' + CITY.lng + '&bbox=' + CITY.box.join(','))
+            .then(function (r) { return r.json(); })
+            .then(function (j) {
+              if (id !== q) return;
+              var items = (j.features || []).filter(function (ft) { var c = ft.geometry.coordinates; return inBox(c[1], c[0]); });
+              list._items = items;
+              list.innerHTML = items.length ? items.map(function (ft, i) {
+                var n = placeName(ft).split(', '), main = n.shift();
+                return '<li role="option" data-i="' + i + '">' + esc(main) + (n.length ? '<small>' + esc(n.join(', ')) + '</small>' : '') + '</li>';
+              }).join('') : '<li aria-disabled="true"><small>No matches in the tricity – try a nearby landmark or tap the map</small></li>';
+            }).catch(function () { list.innerHTML = ''; });
+        }, 350);
+      });
+      list.addEventListener('click', function (ev) {
+        var li = ev.target.closest('li[data-i]'); if (!li) return;
+        var ft = list._items[+li.getAttribute('data-i')], c = ft.geometry.coordinates;
+        list.innerHTML = ''; ensureMap(); setPoint(k, c[1], c[0], placeName(ft));
+      });
+      e[k].addEventListener('blur', function () { setTimeout(function () { list.innerHTML = ''; }, 250); });
+    });
+
+    $('[data-locate]', f).addEventListener('click', function () {
+      var btn = this;
+      if (!navigator.geolocation) return showErr('Location isn’t available on this device – please search instead.');
+      btn.classList.add('busy');
+      navigator.geolocation.getCurrentPosition(function (pos) {
+        btn.classList.remove('busy'); ensureMap(); setPoint('pickup', pos.coords.latitude, pos.coords.longitude, null);
+      }, function () {
+        btn.classList.remove('busy'); showErr('Couldn’t get your location. Please allow location access, or search / tap the map.');
+      }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 });
+    });
+
+    f.addEventListener('change', calc);
+    e.time.addEventListener('input', calc);
+
+    function message() {
+      var car = find(B.cab, val('car'));
+      var whenTxt = val('when') === 'later' ? nice(new Date(e.date.value + 'T' + (e.time.value || '09:00'))) : 'Now (as soon as possible)';
+      var summary = [['Ride', car.name], ['Pickup', e.pickup.value], ['Drop', e.drop.value], ['Distance', routeKm + ' km'], ['When', whenTxt]];
+      var m = ['Hi BroDrive! I want a CITY RIDE.', ''].concat(summary.map(function (x) { return x[0] + ': ' + x[1]; }));
+      if (pts.pickup && pts.drop) m.push('Route: https://www.google.com/maps/dir/?api=1&origin=' + pts.pickup.lat + ',' + pts.pickup.lng + '&destination=' + pts.drop.lat + ',' + pts.drop.lng);
+      if (f._res && !f._res.error) m.push('Website estimate: ' + inr(f._res.total));
+      if (e.name.value) m.push('Name: ' + e.name.value);
+      if (e.mobile.value) m.push('Mobile: ' + e.mobile.value);
+      return { text: m.join('\n'), summary: summary, car: car };
+    }
+    $$('[data-wa-alt]', f).forEach(function (b) { b.addEventListener('click', function () { openWhatsApp(message().text); }); });
+
+    f.addEventListener('submit', function (ev) {
+      ev.preventDefault();
+      if (!(pts.pickup && pts.drop)) { showErr('Please set both pickup and drop (search, use your location, or tap the map).'); return; }
+      if (!f._res || f._res.error) return;
+      if (val('when') === 'later' && !e.date.value) { e.date.closest('.fld').classList.add('invalid'); return; }
+      if (API && !checkContact(f)) { var bad = $('.fld.invalid input', f); if (bad) bad.focus(); return; }
+      var msg = message();
+      submitBooking(f, {
+        service: 'city', pickup: e.pickup.value, drop: e.drop.value,
+        pickupGeo: pts.pickup.lat + ',' + pts.pickup.lng, dropGeo: pts.drop.lat + ',' + pts.drop.lng, km: routeKm,
+        when: val('when'), date: e.date.value, time: e.time.value || '09:00', carId: msg.car.id,
+        name: e.name.value, mobile: e.mobile.value, email: e.email.value, website: e.website.value
+      }, msg.text, msg.summary);
+    });
+
+    root._renderRides = renderRides;
+    renderRides();
+    if (!f.hidden) {
+      var go = function () { setTimeout(ensureMap, 400); };
+      if (document.readyState === 'complete') go(); else window.addEventListener('load', go);
+    }
+  }
+
   /* ---------- Booking widget ---------- */
   var widgets = $$('[data-booking]');
   function initBooking(root) {
@@ -119,6 +323,7 @@
       tabs.forEach(function (t) { t.setAttribute('aria-selected', t.getAttribute('data-tab') === name ? 'true' : 'false'); });
       panes.forEach(function (p) { p.hidden = p.getAttribute('data-pane') !== name; });
       $$('.book-done', root).forEach(function (d) { d.parentNode.removeChild(d); });
+      if (name === 'city' && root._ensureMap) root._ensureMap();
     }
     tabs.forEach(function (t) { t.addEventListener('click', function () { show(t.getAttribute('data-tab')); }); });
     root._show = show;
@@ -129,6 +334,9 @@
     var submitLabel = API ? 'Confirm booking' : 'Book on WhatsApp';
     $$('[data-submit-label]', root).forEach(function (s) { s.textContent = submitLabel; });
     $$('[data-wa-alt]', root).forEach(function (el) { el.classList.toggle('is-hidden', !API); });
+
+    var cityPane = $('[data-pane="city"]', root);
+    if (cityPane) initCity(root, cityPane);
 
     /* Cab pane */
     var cf = $('[data-pane="cab"]', root);
@@ -276,6 +484,8 @@
   /* ---------- Live fleet & prices from the admin panel ---------- */
   function applyCatalog(c) {
     if (!c || !c.ok || c.empty || !c.cab || !c.self || !c.cab.length || !c.self.length) return;
+    var old = {}; B.cab.forEach(function (v) { old[v.id] = v; });
+    c.cab.forEach(function (v) { ['cityBase', 'cityKm', 'cityMin'].forEach(function (k) { if (v[k] === undefined && old[v.id]) v[k] = old[v.id][k]; }); });
     B.cab = c.cab; B.self = c.self;
     for (var k in c.rules) B.rules[k] = c.rules[k];
     widgets.forEach(function (w) {
@@ -284,6 +494,7 @@
       if (sf) selfOptions(sf.elements.car);
       if (w._calcCab) w._calcCab();
       if (w._calcSelf) w._calcSelf();
+      if (w._renderRides) w._renderRides();
     });
   }
   if (API) {

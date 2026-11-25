@@ -21,6 +21,8 @@ window.BRO = {
   "disc30": 20,
   "deliveryFee": 399,
   "freeDeliveryDays": 3,
+  "cityNightPct": 25,
+  "cityMaxKm": 60,
   "lateFeePerHour": 300,
   "cleaningFee": 500,
   "smokingFee": 2000,
@@ -45,7 +47,10 @@ window.BRO = {
    "local": {
     "4h": 999,
     "8h": 1799
-   }
+   },
+   "cityBase": 49,
+   "cityKm": 13,
+   "cityMin": 129
   },
   {
    "type": "cab",
@@ -65,7 +70,10 @@ window.BRO = {
    "local": {
     "4h": 1199,
     "8h": 1999
-   }
+   },
+   "cityBase": 59,
+   "cityKm": 15,
+   "cityMin": 149
   },
   {
    "type": "cab",
@@ -85,7 +93,10 @@ window.BRO = {
    "local": {
     "4h": 1599,
     "8h": 2699
-   }
+   },
+   "cityBase": 79,
+   "cityKm": 19,
+   "cityMin": 229
   },
   {
    "type": "cab",
@@ -105,7 +116,10 @@ window.BRO = {
    "local": {
     "4h": 1899,
     "8h": 3199
-   }
+   },
+   "cityBase": 99,
+   "cityKm": 21,
+   "cityMin": 279
   },
   {
    "type": "cab",
@@ -125,7 +139,10 @@ window.BRO = {
    "local": {
     "4h": 2199,
     "8h": 3699
-   }
+   },
+   "cityBase": 119,
+   "cityKm": 24,
+   "cityMin": 329
   },
   {
    "type": "cab",
@@ -145,7 +162,10 @@ window.BRO = {
    "local": {
     "4h": 3299,
     "8h": 5499
-   }
+   },
+   "cityBase": 0,
+   "cityKm": 0,
+   "cityMin": 0
   }
  ],
  "self": [

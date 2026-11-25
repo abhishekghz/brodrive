@@ -18,7 +18,9 @@
   <a class="brand" href="../" aria-label="BroDrive website"><svg viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="16" fill="#FFB703"/><path d="M28 15h11.5a8.5 8.5 0 0 1 0 17H28zM28 32h13.5a8.5 8.5 0 0 1 0 17H28z" fill="none" stroke="#0B0F17" stroke-width="6.5" stroke-linejoin="round"/><path d="M10 24h8M7 32h11M10 40h8" stroke="#0B0F17" stroke-width="4" stroke-linecap="round"/></svg><span class="brand-word">Bro<b>Drive</b></span><span class="adm-badge">Admin</span></a>
   <nav class="adm-tabs" aria-label="Admin sections" hidden>
     <button type="button" data-view="bookings" aria-current="page">Bookings <span class="count" data-new-count></span></button>
-    <button type="button" data-view="vehicles">Vehicles</button>
+    <button type="button" data-view="schedule">Schedule</button>
+    <button type="button" data-view="fleet">My cars</button>
+    <button type="button" data-view="vehicles">Prices &amp; vehicles</button>
     <button type="button" data-view="rules">Pricing rules</button>
   </nav>
   <button type="button" class="btn btn-ghost btn-sm adm-logout" data-logout hidden>Log out</button>
@@ -48,7 +50,7 @@
     <div class="toolbar">
       <div class="chipbar" data-status-filter role="tablist" aria-label="Filter by status"></div>
       <div class="toolbar-right">
-        <select data-service-filter aria-label="Service"><option value="">All services</option><option>Cab with driver</option><option>Self drive</option></select>
+        <select data-service-filter aria-label="Service"><option value="">All services</option><option>City ride</option><option>Cab with driver</option><option>Self drive</option></select>
         <input type="search" data-search placeholder="Search name, mobile, ID, place…" aria-label="Search bookings">
       </div>
     </div>
@@ -57,6 +59,22 @@
       <tbody data-bookings></tbody>
     </table></div>
     <p class="empty" data-bookings-empty hidden>No bookings match.</p>
+  </section>
+
+  <!-- Schedule -->
+  <section data-section="schedule" hidden>
+    <div class="adm-head"><div><h1>Schedule</h1><p class="muted">Which car is booked on which day. Bookings without a car are flagged so you can assign one.</p></div>
+      <div class="adm-head-actions"><select data-sched-days aria-label="Days to show"><option value="7">Next 7 days</option><option value="14" selected>Next 14 days</option><option value="30">Next 30 days</option></select></div></div>
+    <div data-schedule></div>
+  </section>
+
+  <!-- Fleet register -->
+  <section data-section="fleet" hidden>
+    <div class="adm-head">
+      <div><h1>My cars</h1><p class="muted">Your actual cars with registration numbers and regular drivers. Pick one when approving a booking – the customer gets these details.</p></div>
+      <div class="adm-head-actions"><button type="button" class="btn btn-primary btn-sm" data-add-car>+ Add car</button></div>
+    </div>
+    <div class="vgrid" data-fleet></div>
   </section>
 
   <!-- Vehicles -->
@@ -83,12 +101,19 @@
 <dialog class="adm-dialog" data-booking-dialog>
   <form method="dialog" class="dlg-inner" data-booking-form>
     <div class="dlg-head"><div><h2 data-b-title></h2><p class="muted" data-b-sub></p></div><button class="dlg-x" value="cancel" aria-label="Close">×</button></div>
+    <div class="decide" data-b-decide>
+      <button type="button" class="btn btn-ok" data-approve>✓ Approve &amp; notify</button>
+      <button type="button" class="btn btn-no" data-reject>✕ Reject</button>
+      <span class="muted small">Approve saves, emails the customer (if they gave an email) and opens WhatsApp with the car &amp; driver details.</span>
+    </div>
     <div class="quick" data-b-quick></div>
     <div class="dlg-grid">
       <div><h3>Details</h3><dl class="kv" data-b-details></dl></div>
       <div>
         <h3>Update booking</h3>
         <div class="grid2">
+          <label class="fld full"><span>Assign one of my cars</span><select name="assign"><option value="">— choose a car (fills the fields below) —</option></select></label>
+          <p class="clash full" data-clash hidden></p>
           <label class="fld full"><span>Status</span><select name="status"></select></label>
           <label class="fld"><span>Vehicle number</span><input name="vehicleNo" placeholder="CH01 AB 1234"></label>
           <label class="fld"><span>Final fare (₹)</span><input name="finalFare" inputmode="numeric" placeholder="e.g. 3500"></label>
@@ -100,6 +125,7 @@
         <div class="dlg-actions">
           <button type="button" class="btn btn-primary" data-save="email">Save &amp; email customer</button>
           <button type="button" class="btn btn-dark" data-save="quiet">Save</button>
+          <button type="button" class="btn btn-wa" data-send-wa>Send on WhatsApp</button>
         </div>
         <h3 style="margin-top:22px">History</h3><pre class="history" data-b-history></pre>
       </div>
@@ -114,6 +140,24 @@
     <div class="grid2" data-v-fields></div>
     <p class="book-error" data-v-error role="alert"></p>
     <div class="dlg-actions"><button type="submit" class="btn btn-primary">Save vehicle</button><button type="button" class="btn btn-ghost" data-close>Cancel</button></div>
+  </form>
+</dialog>
+
+<!-- Fleet car dialog -->
+<dialog class="adm-dialog narrow" data-car-dialog>
+  <form class="dlg-inner" data-car-form>
+    <div class="dlg-head"><h2 data-c-title>Add car</h2><button type="button" class="dlg-x" data-close aria-label="Close">×</button></div>
+    <div class="grid2">
+      <label class="fld"><span>Registration number *</span><input name="regNo" placeholder="CH01 AB 1234" required></label>
+      <label class="fld"><span>Model *</span><input name="model" placeholder="Maruti Dzire (White)"></label>
+      <label class="fld full"><span>Category</span><select name="category"></select></label>
+      <label class="fld"><span>Regular driver</span><input name="driverName" placeholder="Name (leave empty for self drive)"></label>
+      <label class="fld"><span>Driver phone</span><input name="driverPhone" inputmode="tel"></label>
+      <label class="fld full"><span>Notes</span><input name="notes" placeholder="e.g. CNG, carrier, insurance till Mar 2027"></label>
+      <label class="chk fld full"><input type="checkbox" name="active" checked> Available for bookings</label>
+    </div>
+    <p class="book-error" data-c-error role="alert"></p>
+    <div class="dlg-actions"><button type="submit" class="btn btn-primary">Save car</button><button type="button" class="btn btn-ghost" data-close>Cancel</button></div>
   </form>
 </dialog>
 

@@ -12,7 +12,7 @@ After editing, run from the repo root:
 It rewrites every .html page, assets/js/rates.js, sitemap.xml and robots.txt.
 No packages needed – plain Python 3.
 """
-import json, os, html, datetime
+import json, os, html, datetime, re
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TODAY = datetime.date.today().isoformat()
@@ -37,6 +37,7 @@ SITE = {
     "postal": "160022",
     "lat": 30.7333, "lng": 76.7794,
     "google_verification": "",            # paste the code from Google Search Console here
+    "indexnow_key": "d88bc06cc741f12a40462e5b5845e098",  # public key for IndexNow (instant Bing/Yandex indexing)
     "instagram": "", "facebook": "",
 }
 
@@ -47,12 +48,12 @@ SITE = {
 # hr = extra hour (local/waiting), transfer = flat city/airport transfer (first 25 km),
 # local = hourly packages within tricity.
 CAB_CARS = [
-    dict(id="hatch",  name="Hatchback",       models="WagonR, Swift, Celerio",   seats="4+1",  bags="2 bags", icon="hatch", km=11, da=300, hr=130, transfer=549,  local={"4h": 999,  "8h": 1799}),
-    dict(id="sedan",  name="Sedan",           models="Dzire, Aura, Etios",       seats="4+1",  bags="3 bags", icon="sedan", km=12, da=300, hr=150, transfer=649,  local={"4h": 1199, "8h": 1999}),
-    dict(id="suv",    name="SUV / MUV",       models="Ertiga, Carens, Rumion",   seats="6+1",  bags="3 bags", icon="suv",   km=15, da=300, hr=200, transfer=899,  local={"4h": 1599, "8h": 2699}),
-    dict(id="innova", name="Innova",          models="Toyota Innova",            seats="7+1",  bags="4 bags", icon="suv",   km=17, da=300, hr=250, transfer=1099, local={"4h": 1899, "8h": 3199}),
-    dict(id="crysta", name="Innova Crysta",   models="Innova Crysta / Hycross",  seats="7+1",  bags="4 bags", icon="suv",   km=19, da=400, hr=275, transfer=1299, local={"4h": 2199, "8h": 3699}),
-    dict(id="tempo",  name="Tempo Traveller", models="Force Traveller 12-seater", seats="12+1", bags="8 bags", icon="van",   km=26, da=500, hr=400, transfer=1999, local={"4h": 3299, "8h": 5499}),
+    dict(id="hatch",  name="Hatchback",       models="WagonR, Swift, Celerio",   seats="4+1",  bags="2 bags", icon="hatch", km=11, da=300, hr=130, transfer=549,  local={"4h": 999,  "8h": 1799}, cityBase=49, cityKm=13, cityMin=129),
+    dict(id="sedan",  name="Sedan",           models="Dzire, Aura, Etios",       seats="4+1",  bags="3 bags", icon="sedan", km=12, da=300, hr=150, transfer=649,  local={"4h": 1199, "8h": 1999}, cityBase=59, cityKm=15, cityMin=149),
+    dict(id="suv",    name="SUV / MUV",       models="Ertiga, Carens, Rumion",   seats="6+1",  bags="3 bags", icon="suv",   km=15, da=300, hr=200, transfer=899,  local={"4h": 1599, "8h": 2699}, cityBase=79, cityKm=19, cityMin=229),
+    dict(id="innova", name="Innova",          models="Toyota Innova",            seats="7+1",  bags="4 bags", icon="suv",   km=17, da=300, hr=250, transfer=1099, local={"4h": 1899, "8h": 3199}, cityBase=99, cityKm=21, cityMin=279),
+    dict(id="crysta", name="Innova Crysta",   models="Innova Crysta / Hycross",  seats="7+1",  bags="4 bags", icon="suv",   km=19, da=400, hr=275, transfer=1299, local={"4h": 2199, "8h": 3699}, cityBase=119, cityKm=24, cityMin=329),
+    dict(id="tempo",  name="Tempo Traveller", models="Force Traveller 12-seater", seats="12+1", bags="8 bags", icon="van",   km=26, da=500, hr=400, transfer=1999, local={"4h": 3299, "8h": 5499}, cityBase=0, cityKm=0, cityMin=0),
 ]
 # Self drive (Chandigarh only).  day = 24 hrs, half = 12 hrs, xkm = extra km beyond cap,
 # dep = refundable security deposit, age = minimum driver age.
@@ -76,6 +77,7 @@ RULES = dict(
     unlimitedPct=40,        # unlimited km add-on, % of rental
     disc7=10, disc30=20,    # long-rental discount %
     deliveryFee=399, freeDeliveryDays=3,
+    cityNightPct=25, cityMaxKm=60,  # city rides: night surcharge %, max km before it counts as outstation
     lateFeePerHour=300, cleaningFee=500, smokingFee=2000, refuelFee=100,
 )
 # Destinations for the calculator: (name, approx road km from Chandigarh)
@@ -86,7 +88,7 @@ PLACES = [
     ("Karnal", 125), ("Anandpur Sahib", 85), ("Jalandhar", 150), ("Panipat", 160), ("Dehradun", 170),
     ("Mussoorie", 205), ("Haridwar", 205), ("Rishikesh", 220), ("Bathinda", 220), ("Amritsar", 230),
     ("Dharamshala", 240), ("Hisar", 250), ("Delhi", 250), ("Delhi Airport (IGI)", 255), ("Kullu", 260),
-    ("Gurugram", 270), ("Noida", 270), ("Manali", 300), ("Katra", 330), ("Jaipur", 520),
+    ("Gurugram", 270), ("Noida", 270), ("Manali", 300), ("Katra", 390), ("Jaipur", 520),
 ]
 PLACES.sort(key=lambda p: p[1])
 
@@ -103,6 +105,10 @@ def load_live():
         with urllib.request.urlopen(SITE["api_url"] + "?action=catalog", timeout=30) as r:
             d = json.load(r)
         if d.get("ok") and d.get("cab") and d.get("self"):
+            dflt = {c["id"]: c for c in DEFAULTS["cab"]}
+            for c in d["cab"]:  # older backend versions have no city-ride fares yet
+                for k in ("cityBase", "cityKm", "cityMin"):
+                    if k not in c: c[k] = dflt.get(c["id"], {}).get(k, 0)
             CAB_CARS[:] = d["cab"]; SELF_CARS[:] = d["self"]
             RULES.update({k: v for k, v in d.get("rules", {}).items() if k in RULES})
             print(f"Using live prices from admin panel ({len(CAB_CARS)} cab + {len(SELF_CARS)} self-drive vehicles)")
@@ -189,6 +195,7 @@ ICONS = {
     "clock": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>',
     "user": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>',
     "spark": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/></svg>',
+    "pin": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/><circle cx="12" cy="12" r="7"/></svg>',
     "key": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6M15.5 7.5l3 3L22 7l-3-3"/></svg>',
 }
 
@@ -238,6 +245,7 @@ def footer(p):
       <li><a href="{p}car-rental-with-driver/">Car rental with driver</a></li>
       <li><a href="{p}car-rental-with-driver/#oneway">One way cabs</a></li>
       <li><a href="{p}car-rental-with-driver/#local">Local hourly taxi</a></li>
+      {"".join(f'<li><a href="{p}{x["slug"]}/">{x["short"]}</a></li>' for x in SERVICES)}
       <li><a href="{p}rates/">Rate card</a></li>
       <li><a href="{p}terms/">Policies &amp; terms</a></li></ul></div>
     <div><h4>Areas we serve</h4><ul>{cities}</ul></div>
@@ -248,7 +256,7 @@ def footer(p):
 </div></footer>
 <div class="mbar"><a class="btn btn-ghost" href="{tel()}">{ICONS["phone"]}Call</a><a class="btn btn-wa" href="{wa()}" rel="noopener">{ICONS["wa"]}WhatsApp</a><a class="btn btn-primary" href="#book">Get fare</a></div>'''
 
-def booking(tab="cab", from_city="Chandigarh", dest=None, cab_car="sedan", self_car="sedan", trip="oneway"):
+def booking(tab="city", from_city="Chandigarh", dest=None, cab_car="sedan", self_car="sedan", trip="oneway"):
     dest_opts = ['<option value="">Select destination</option>']
     for name, km in PLACES:
         sel = " selected" if name == dest else ""
@@ -257,11 +265,34 @@ def booking(tab="cab", from_city="Chandigarh", dest=None, cab_car="sedan", self_
     cab_opts = "".join(f'<option value="{c["id"]}"{" selected" if c["id"] == cab_car else ""}>{c["name"]} · {c["seats"]} seats · ₹{c["km"]}/km</option>' for c in CAB_CARS)
     self_opts = "".join(f'<option value="{c["id"]}"{" selected" if c["id"] == self_car else ""}>{c["name"]} ({c["models"]}) · {inr(c["day"])}/day</option>' for c in SELF_CARS)
     def chk(v): return " checked" if v == trip else ""
+    global _UID
+    _UID += 1; uid = _UID
     return f'''<div class="book-card" id="book" data-booking data-tab-default="{tab}">
   <div class="book-tabs" role="tablist" aria-label="Booking type">
-    <button type="button" role="tab" data-tab="cab" aria-selected="true">Cab with Driver<small>One way · Round trip · Local</small></button>
-    <button type="button" role="tab" data-tab="self" aria-selected="false">Self Drive<small>Chandigarh only</small></button>
+    <button type="button" role="tab" data-tab="city" aria-selected="true">City Ride<small>Tricity, point to point</small></button>
+    <button type="button" role="tab" data-tab="cab" aria-selected="false">Outstation<small>One way · Round · Hourly</small></button>
+    <button type="button" role="tab" data-tab="self" aria-selected="false">Self Drive<small>Chandigarh</small></button>
   </div>
+  <form class="book-pane" data-pane="city" hidden novalidate>
+    <div class="city-map" data-map role="application" aria-label="Map – tap to set pickup, then drop"><p class="map-hint">Loading map…</p></div>
+    <div class="grid2">
+      <div class="fld full loc"><label for="cp-{uid}">Pickup</label><div class="loc-row"><input id="cp-{uid}" name="pickup" placeholder="Search area or tap the map" autocomplete="off"><button type="button" class="loc-me" data-locate aria-label="Use my current location">{ICONS["pin"]}</button></div><ul class="sugg" data-sugg="pickup" role="listbox"></ul></div>
+      <div class="fld full loc"><label for="cd-{uid}">Drop</label><input id="cd-{uid}" name="drop" placeholder="Where to?" autocomplete="off"><ul class="sugg" data-sugg="drop" role="listbox"></ul></div>
+      <div class="fld full"><div class="seg seg2" role="radiogroup" aria-label="When"><label><input type="radio" name="when" value="now" checked><span>Ride now</span></label><label><input type="radio" name="when" value="later"><span>Schedule</span></label></div></div>
+      <label class="fld is-hidden" data-later><span>Date</span><input type="date" name="date"></label>
+      <label class="fld is-hidden" data-later><span>Time</span><input type="time" name="time" value="09:00"></label>
+      <div class="fld full"><span>Choose your ride</span><div class="ride-list" data-rides role="radiogroup" aria-label="Car type"></div></div>
+      <label class="fld"><span>Your name *</span><input name="name" autocomplete="name" placeholder="Name" required></label>
+      <label class="fld"><span>Mobile *</span><input type="tel" name="mobile" autocomplete="tel" inputmode="tel" placeholder="10-digit mobile" required></label>
+      <label class="fld full"><span>Email (for booking confirmation)</span><input type="email" name="email" autocomplete="email" placeholder="you@example.com"></label>
+      <input class="hp" name="website" tabindex="-1" autocomplete="off" aria-hidden="true">
+    </div>
+    <div class="estimate" aria-live="polite"><p class="est-empty">Set pickup and drop to see your fare.</p></div>
+    <p class="book-error" role="alert"></p>
+    <div class="book-actions"><button type="submit" class="btn btn-primary"><span data-submit-label>{"Confirm booking" if SITE["api_url"] else "Book on WhatsApp"}</span></button><a class="btn btn-ghost" href="{tel()}" aria-label="Call BroDrive">{ICONS["phone"]}Call</a></div>
+    <button type="button" class="linkish wa-alt{"" if SITE["api_url"] else " is-hidden"}" data-wa-alt>{ICONS["wa"]}Prefer WhatsApp? Send these details on WhatsApp</button>
+    <p class="fineprint">Chandigarh, Mohali, Panchkula &amp; Zirakpur. "Ride now" bookings are confirmed by call; a driver usually reaches you in 20–30 minutes. Night charge {RULES["cityNightPct"]}% (10 PM–6 AM).</p>
+  </form>
   <form class="book-pane" data-pane="cab" novalidate>
     <div class="seg" role="radiogroup" aria-label="Trip type">
       <label><input type="radio" name="trip" value="oneway"{chk("oneway")}><span>One Way</span></label>
@@ -311,6 +342,8 @@ def booking(tab="cab", from_city="Chandigarh", dest=None, cab_car="sedan", self_
     <p class="fineprint">Pickup &amp; return in Chandigarh. Original driving licence + Aadhaar required. Fuel not included. Refundable deposit collected at pickup.</p>
   </form>
 </div>'''
+
+_UID = 0
 
 def cab_cards(p, dest=None):
     out = []
@@ -551,6 +584,142 @@ ROUTES = [
                ("How long is the drive from Chandigarh to Amritsar?", "Around 4 to 4½ hours by road.")]),
 ]
 
+ROUTES += [
+    dict(slug="chandigarh-to-kasauli-cab", to="Kasauli", km=60, time="1½–2 hrs", rt_days=1,
+         via="NH5 via Zirakpur, Pinjore, Parwanoo and Dharampur, then the Kasauli road",
+         stops=["Pinjore Gardens", "Timber Trail ropeway, Parwanoo", "Monkey Point", "Christ Church", "Sunset Point"],
+         text=["Kasauli is the closest proper hill escape from Chandigarh – pine forests, colonial churches and cool air barely two hours away. It's ideal for a same-day trip or a quiet weekend.",
+               "Most families book a same-day round trip: leave after breakfast, lunch on the Mall, catch the sunset and be home by dinner. Your driver waits while you explore."],
+         faqs=[("What is the taxi fare from Chandigarh to Kasauli?", f"A same-day round trip in a sedan is about {inr(roundtrip(CAB['sedan'], 60, 1))} and a one-way drop about {inr(oneway(CAB['sedan'], 60))}, including driver. Himachal entry tax, toll and parking are extra."),
+               ("Can I do Kasauli and Timber Trail in one day?", "Yes. Both are on the same road; a day round trip covers Timber Trail, Monkey Point and the Mall comfortably."),
+               ("Is the road to Kasauli safe at night?", "It's a well-used hill road, but we recommend starting back before dark in winter. Our drivers are hill-trained.")]),
+    dict(slug="chandigarh-to-dharamshala-cab", to="Dharamshala", km=240, time="5½–6 hrs", rt_days=2,
+         via="Ropar, Anandpur Sahib, Una and Kangra",
+         stops=["Anandpur Sahib", "Chintpurni temple", "Kangra Fort", "McLeod Ganj", "Bhagsu Nag waterfall"],
+         text=["Dharamshala and McLeod Ganj mix Tibetan culture, mountain cafés and the Triund trek – a favourite long weekend from Chandigarh.",
+               "Book a 2-day round trip so your driver can also take you to Bhagsu Nag, the Dalai Lama temple and Kangra Fort, or a one-way drop if you're staying longer."],
+         faqs=[("What is the cab fare from Chandigarh to Dharamshala?", f"A one-way sedan is about {inr(oneway(CAB['sedan'], 240))}; a 2-day round trip in a sedan is about {inr(roundtrip(CAB['sedan'], 240, 2))} and in an Innova Crysta about {inr(roundtrip(CAB['crysta'], 240, 2))}. Tolls, Himachal entry tax and parking are extra."),
+               ("Can the cab go up to McLeod Ganj?", "Yes, McLeod Ganj sightseeing is included in the km of a round trip."),
+               ("How long is the drive?", "About 5½ to 6 hours via Una and Kangra.")]),
+    dict(slug="chandigarh-to-haridwar-cab", to="Haridwar", km=205, time="4½–5 hrs", rt_days=2,
+         via="Ambala, Yamunanagar, Saharanpur and Roorkee",
+         stops=["Har Ki Pauri Ganga Aarti", "Mansa Devi & Chandi Devi ropeways", "Rishikesh (25 km)", "Lakshman Jhula", "Beatles Ashram"],
+         text=["Haridwar's evening Ganga Aarti at Har Ki Pauri is one of the most moving sights in India, and it's an easy drive from the tricity.",
+               "Many families combine Haridwar with Rishikesh in a 2-day round trip. For pilgrim groups, the Tempo Traveller is the most comfortable and economical choice."],
+         faqs=[("What is the taxi fare from Chandigarh to Haridwar?", f"A one-way sedan is about {inr(oneway(CAB['sedan'], 205))}; a 2-day round trip in a sedan is about {inr(roundtrip(CAB['sedan'], 205, 2))}. Tolls, Uttarakhand entry tax and parking are extra."),
+               ("Can we add Rishikesh to the trip?", "Yes – Rishikesh is 25 km beyond Haridwar; the extra km are simply added at the per-km rate."),
+               ("Is a Tempo Traveller available for Haridwar?", f"Yes, 12-seater Tempo Travellers are ₹{CAB['tempo']['km']}/km for outstation trips.")]),
+    dict(slug="chandigarh-to-dehradun-cab", to="Dehradun", km=170, time="4 hrs", rt_days=1,
+         via="Panchkula, Naraingarh, Kala Amb and Paonta Sahib",
+         stops=["Kala Amb", "Paonta Sahib Gurudwara", "Robber's Cave", "Sahastradhara", "Mussoorie (35 km)"],
+         text=["The scenic route through Naraingarh and Paonta Sahib makes Chandigarh–Dehradun a pleasant 4-hour drive past the Shivalik foothills.",
+               "Students heading to Dehradun's schools and colleges, families visiting Mussoorie and business travellers all use our one-way drops on this route."],
+         faqs=[("What is the cab fare from Chandigarh to Dehradun?", f"A one-way sedan is about {inr(oneway(CAB['sedan'], 170))} and a same-day round trip about {inr(roundtrip(CAB['sedan'], 170, 1))}, including driver. Tolls and state entry tax are extra."),
+               ("Can I go to Mussoorie in the same cab?", "Yes. Mussoorie is about 35 km beyond Dehradun; extra km are added at the per-km rate."),
+               ("Which route do you take?", "Usually via Naraingarh, Kala Amb and Paonta Sahib – about 4 hours.")]),
+    dict(slug="chandigarh-to-katra-cab", to="Katra", km=390, time="8–9 hrs", rt_days=3,
+         via="Hoshiarpur, Pathankot and Jammu",
+         stops=["Hoshiarpur", "Pathankot", "Jammu", "Vaishno Devi base camp (Katra)", "Shiv Khori (optional)"],
+         text=["The Vaishno Devi yatra starts at Katra, and a cab from Chandigarh is the most flexible way to get the family there with all the luggage.",
+               "Most pilgrims book a 3-day round trip: day one to Katra, day two for the darshan, day three back. The driver's stay is covered by the daily allowance."],
+         faqs=[("What is the taxi fare from Chandigarh to Katra?", f"A one-way sedan is about {inr(oneway(CAB['sedan'], 390))}; a 3-day round trip in a sedan is about {inr(roundtrip(CAB['sedan'], 390, 3))} and in an Innova Crysta about {inr(roundtrip(CAB['crysta'], 390, 3))}. Tolls, J&K entry tax and parking are extra."),
+               ("Does the fare include the driver's stay?", "Yes – the daily driver allowance covers the driver's food and stay."),
+               ("Can we visit Shiv Khori on the same trip?", "Yes, add a day and the extra km; we'll plan the route with you.")]),
+    dict(slug="chandigarh-to-ludhiana-cab", to="Ludhiana", km=100, time="2 hrs", rt_days=1,
+         via="Kharar and Samrala (NH5)",
+         stops=["Kharar", "Samrala", "Ludhiana Clock Tower", "Gurudwara Manji Sahib Alamgir", "Punjab Agricultural University"],
+         text=["Ludhiana is Punjab's business capital, and the two-hour run from Chandigarh is one of our most frequent trips for meetings, weddings and family visits.",
+               "Book a same-day round trip if you need the car while there, or a one-way drop – you only pay for the distance travelled."],
+         faqs=[("What is the taxi fare from Chandigarh to Ludhiana?", f"A one-way hatchback is about {inr(oneway(CAB['hatch'], 100))}, a sedan about {inr(oneway(CAB['sedan'], 100))}; a same-day round trip in a sedan is about {inr(roundtrip(CAB['sedan'], 100, 1))}."),
+               ("How long does it take?", "About 2 hours via Kharar and Samrala."),
+               ("Do you pick up from Ludhiana to Chandigarh?", "Yes – message us with your pickup address in Ludhiana and we'll confirm the fare.")]),
+    dict(slug="chandigarh-to-jaipur-cab", to="Jaipur", km=520, time="9–10 hrs", rt_days=2,
+         via="Panipat, the KMP Expressway and NH48 via Behror",
+         stops=["Panipat", "KMP Expressway", "Neemrana Fort", "Amber Fort", "Hawa Mahal"],
+         text=["Jaipur is a full day's drive from Chandigarh, best done in a comfortable sedan or SUV with an experienced highway driver.",
+               "Book a one-way drop for a wedding or a 2-day (or longer) round trip to see Amber Fort, City Palace and Nahargarh with the same car."],
+         faqs=[("What is the taxi fare from Chandigarh to Jaipur?", f"A one-way sedan is about {inr(oneway(CAB['sedan'], 520))} and an Innova Crysta about {inr(oneway(CAB['crysta'], 520))}, including driver. Tolls and Rajasthan entry tax are extra."),
+               ("How long is the drive?", "About 9 to 10 hours with breaks."),
+               ("Can we stop at Neemrana?", "Yes, Neemrana Fort is right on the route.")]),
+]
+
+# Keyword landing pages (each targets a common Google search)
+SERVICES = [
+    dict(slug="local-taxi-chandigarh", tab="city", short="Local taxi / city ride",
+         title="Local Taxi in Chandigarh | Book a City Cab from ₹129 – BroDrive",
+         desc="Book a local taxi in Chandigarh, Mohali, Panchkula & Zirakpur. Point-to-point city rides with instant fare – set pickup and drop on the map. Ride now or schedule, 24×7.",
+         h1="Local Taxi &amp; City Rides in <em>Chandigarh</em>",
+         lead="Need a cab within the tricity right now? Pick your pickup and drop on the map, see the fare instantly and book – no app download needed.",
+         intro=["BroDrive City Ride works like the ride apps you know, but with a local team you can actually call. Choose pickup and drop anywhere in Chandigarh, Mohali, Panchkula or Zirakpur, see the fare before you book, and we confirm your driver by phone.",
+                "It's perfect for office commutes, hospital visits to PGI or Fortis, shopping at Elante, a ride to the railway station or ISBT, or a late-night drop home. Every ride is in a clean AC car with a verified driver."],
+         points=["Fare shown upfront before booking", "Ride now or schedule for later", "Pickup from your exact pinned location", "Hatchback, sedan, SUV and Innova options", "Pay by UPI or cash after the ride", "Call or WhatsApp a real person 24×7"],
+         cards="city",
+         faqs=[("How much is a local taxi in Chandigarh?", f"City rides start at {inr(min(c['cityMin'] for c in CAB_CARS if c.get('cityKm')))} (minimum fare). A typical 10 km ride in a hatchback is about {inr(CAB['hatch']['cityBase'] + 10 * CAB['hatch']['cityKm'])}."),
+               ("Do I need to download an app?", "No. Book right here on the website – it works on any phone – or call/WhatsApp us."),
+               ("How quickly will the cab arrive?", "For 'Ride now' bookings we call you within minutes to confirm; a driver usually reaches you in 20–30 minutes. For guaranteed timing, schedule your ride in advance."),
+               ("Do you charge extra at night?", f"A {RULES['cityNightPct']}% night charge applies between 10 PM and 6 AM.")]),
+    dict(slug="airport-taxi-chandigarh", tab="cab", dest="Chandigarh Airport (IXC)", short="Chandigarh Airport taxi",
+         title="Chandigarh Airport Taxi | Airport Cab from ₹549 – BroDrive",
+         desc=f"Chandigarh International Airport (IXC) taxi – pickup & drop from Chandigarh, Mohali, Panchkula, Zirakpur from {inr(CAB['hatch']['transfer'])}. Also Delhi Airport cabs. 24×7, flight tracking, fixed fares.",
+         h1="Chandigarh <em>Airport Taxi</em>",
+         lead="Fixed-fare airport pickups and drops for Chandigarh International Airport (IXC) – and one-way cabs to Delhi IGI – 24×7.",
+         intro=["Flights at Chandigarh Airport start before 6 AM and land past midnight, so you need a cab that turns up on time. BroDrive airport transfers are flat-fare for the first 25 km, so a drop from anywhere in the tricity costs the same whether there's traffic or not.",
+                "For pickups, share your flight number and we'll track it – your driver waits at arrivals with a name board. Heading to Delhi instead? Our one-way Chandigarh–Delhi Airport cabs mean you never pay for the empty return."],
+         points=[f"Hatchback {inr(CAB['hatch']['transfer'])}, sedan {inr(CAB['sedan']['transfer'])}, SUV {inr(CAB['suv']['transfer'])}", "Flight tracking on pickups", "Meet & greet at arrivals", "Early-morning & late-night runs", f"Delhi Airport (IGI) one way from {inr(oneway(CAB['hatch'], 255))}", "Luggage-friendly SUVs and Innova"],
+         cards="cab",
+         faqs=[("What is the taxi fare to Chandigarh Airport?", f"Airport transfers within the tricity are {inr(CAB['hatch']['transfer'])} (hatchback), {inr(CAB['sedan']['transfer'])} (sedan) and {inr(CAB['suv']['transfer'])} (SUV) for the first {RULES['transferIncludedKm']} km, driver included. Airport parking/entry fee is extra."),
+               ("Do you pick up from Chandigarh Airport at night?", f"Yes, 24×7. A night charge of {inr(RULES['nightCharge'])} applies between 10 PM and 6 AM."),
+               ("How much is a cab from Chandigarh to Delhi Airport?", f"A one-way sedan to Delhi IGI Airport is about {inr(oneway(CAB['sedan'], 255))} including driver allowance; tolls extra.")]),
+    dict(slug="car-on-rent-chandigarh", tab="cab", short="Car on rent",
+         title="Car on Rent in Chandigarh | With Driver or Self Drive – BroDrive",
+         desc=f"Car on rent in Chandigarh with driver from ₹{CHEAP_CAB['km']}/km or self drive from {inr(CHEAP_SELF['day'])}/day. Hatchback, sedan, SUV, Innova Crysta, Thar, Tempo Traveller. Book online 24×7.",
+         h1="Car on Rent in <em>Chandigarh</em>",
+         lead="Rent a car with a driver for local and outstation trips, or drive yourself – the whole fleet, one simple booking.",
+         intro=["Whether it's a wedding, a family trip to the hills, a business visit or just a weekend drive, BroDrive has a car on rent for it. Choose a chauffeur-driven cab billed per km, an hourly local package, or a self-drive car billed per day.",
+                "Every rental comes with clear, published prices – see our rate card – and a real local team you can call any time."],
+         points=[f"With driver from ₹{CHEAP_CAB['km']}/km", f"Self drive from {inr(CHEAP_SELF['day'])}/day", f"Local 8 hrs / 80 km from {inr(CHEAP_CAB['local']['8h'])}", "Wedding & event cars", "Monthly rentals with discounts", "Doorstep delivery in Chandigarh"],
+         cards="both",
+         faqs=[("How much does it cost to rent a car in Chandigarh?", f"With driver: from ₹{CHEAP_CAB['km']}/km outstation or {inr(CHEAP_CAB['local']['8h'])} for 8 hrs/80 km locally. Self drive: from {inr(CHEAP_SELF['day'])} per day."),
+               ("Can I rent a car for a month?", f"Yes. Self-drive rentals of 30+ days get {RULES['disc30']}% off; message us for monthly chauffeur packages."),
+               ("Do you rent cars for weddings?", "Yes – sedans, Innova Crysta and Tempo Travellers for baraat and guest movement. Book early for wedding season.")]),
+    dict(slug="tempo-traveller-on-rent-chandigarh", tab="cab", cab_car="tempo", short="Tempo Traveller on rent",
+         title="Tempo Traveller on Rent in Chandigarh | 12 Seater – BroDrive",
+         desc=f"Hire a 12-seater Tempo Traveller in Chandigarh for group trips, weddings & pilgrimages. ₹{CAB['tempo']['km']}/km outstation, local 8 hrs from {inr(CAB['tempo']['local']['8h'])}. Shimla, Manali, Haridwar, Katra.",
+         h1="Tempo Traveller on Rent in <em>Chandigarh</em>",
+         lead="Comfortable 12-seater Force Tempo Travellers with pushback seats and experienced drivers for family and group trips.",
+         intro=["Travelling with a big family, a wedding party or a group of friends? One Tempo Traveller is cheaper and far more fun than three cars. Ours are AC, with pushback seats, a music system and a roof carrier for luggage.",
+                "Popular trips include Shimla–Manali tours, Haridwar–Rishikesh pilgrimages, Vaishno Devi yatras and wedding guest transfers within the tricity."],
+         points=[f"₹{CAB['tempo']['km']}/km outstation", f"Local 8 hrs / 80 km {inr(CAB['tempo']['local']['8h'])}", f"Driver allowance {inr(CAB['tempo']['da'])}/day", "12 pushback seats + driver", "Roof carrier for luggage", "Hill-trained drivers"],
+         cards="tempo",
+         faqs=[("What is the Tempo Traveller rate in Chandigarh?", f"₹{CAB['tempo']['km']} per km for outstation (minimum {RULES['roundMinKmPerDay']} km/day on round trips) plus {inr(CAB['tempo']['da'])}/day driver allowance. Local 8 hrs / 80 km is {inr(CAB['tempo']['local']['8h'])}."),
+               ("How much is a Tempo Traveller from Chandigarh to Manali?", f"A 3-day round trip is about {inr(roundtrip(CAB['tempo'], 300, 3))}, plus tolls, Himachal entry tax and parking."),
+               ("How many people fit in a Tempo Traveller?", "12 passengers plus the driver, with luggage on the roof carrier.")]),
+    dict(slug="innova-crysta-on-rent-chandigarh", tab="cab", cab_car="crysta", short="Innova Crysta on rent",
+         title="Innova Crysta on Rent in Chandigarh | With Driver – BroDrive",
+         desc=f"Rent an Innova Crysta with driver in Chandigarh – ₹{CAB['crysta']['km']}/km outstation, local 8 hrs {inr(CAB['crysta']['local']['8h'])}. Also self-drive Crysta {inr(SELF['crysta']['day'])}/day. Family trips, weddings, airport.",
+         h1="Innova Crysta on Rent in <em>Chandigarh</em>",
+         lead="The family favourite for hill trips and weddings – 7 seats, big boot, smooth ride. With driver or self drive.",
+         intro=["The Toyota Innova Crysta is the most requested car for long trips from Chandigarh: comfortable captain seats, strong AC, plenty of luggage space and a reassuring ride on mountain roads.",
+                "Book it with an experienced driver for Shimla, Manali or Dharamshala, or as a self-drive car if you prefer to take the wheel yourself."],
+         points=[f"With driver ₹{CAB['crysta']['km']}/km", f"Local 8 hrs / 80 km {inr(CAB['crysta']['local']['8h'])}", f"Self drive {inr(SELF['crysta']['day'])}/day", "7 seats + driver", "Ideal for hills & weddings", "Airport transfers available"],
+         cards="crysta",
+         faqs=[("What is the Innova Crysta rent per km in Chandigarh?", f"₹{CAB['crysta']['km']} per km with driver, plus {inr(CAB['crysta']['da'])}/day driver allowance."),
+               ("Can I rent an Innova Crysta without a driver?", f"Yes – self-drive Innova Crysta is {inr(SELF['crysta']['day'])} per 24 hours with a refundable deposit of {inr(SELF['crysta']['dep'])}. Minimum age {SELF['crysta']['age']}."),
+               ("How much is an Innova Crysta from Chandigarh to Shimla?", f"A same-day round trip is about {inr(roundtrip(CAB['crysta'], 115, 1))} including driver; Himachal entry tax, toll and parking extra.")]),
+    dict(slug="thar-on-rent-chandigarh", tab="self", self_car="thar", short="Thar on rent (self drive)",
+         title="Thar on Rent in Chandigarh | Self Drive Thar 4x4 – BroDrive",
+         desc=f"Self drive Mahindra Thar on rent in Chandigarh from {inr(SELF['thar']['day'])}/day. {RULES['selfKmPerDay']} km/day free, unlimited km option, doorstep delivery. Perfect for Kasauli, Shimla & Manali.",
+         h1="Thar on Rent in <em>Chandigarh</em>",
+         lead="Take the Mahindra Thar 4x4 to the hills – self drive, delivered to your door in Chandigarh.",
+         intro=["Nothing says road trip like a Thar. Rent our self-drive Mahindra Thar 4x4 for a weekend in Kasauli, a snow run to Narkanda or a full Himachal loop.",
+                "Pickup and return are in Chandigarh; we can deliver it to your doorstep. Every rental includes insurance and 24×7 roadside assistance."],
+         points=[f"{inr(SELF['thar']['day'])} per 24 hrs", f"12-hr plan {inr(SELF['thar']['half'])}", f"{RULES['selfKmPerDay']} km/day free, extra ₹{SELF['thar']['xkm']}/km", f"Refundable deposit {inr(SELF['thar']['dep'])}", f"Minimum age {SELF['thar']['age']}", "Doorstep delivery in Chandigarh"],
+         cards="self",
+         faqs=[("What is the Thar rent per day in Chandigarh?", f"{inr(SELF['thar']['day'])} per 24 hours with {RULES['selfKmPerDay']} free km, or {inr(SELF['thar']['half'])} for 12 hours. Fuel is not included."),
+               ("Can I take the Thar to Manali or Spiti?", "Yes – tell us your route at booking. Permits, tolls and state taxes are paid by you."),
+               ("What documents do I need?", f"Original driving licence (1+ year old), Aadhaar and one more ID. Minimum age {SELF['thar']['age']}.")]),
+]
+
 HOME_FAQS = [
     ("How do I book a cab or self-drive car with BroDrive?", "Fill in the booking form above to see your fare, then tap <b>Book on WhatsApp</b> – your trip details are sent to us automatically. You can also call us 24×7. We confirm the car, driver details and final fare within minutes."),
     ("What is included in the cab fare?", f"The car, fuel and driver are included. Driver allowance ({inr(CAB['sedan']['da'])}/day for most cars) is shown separately in the estimate. Toll, parking, state entry tax and {RULES['gst']}% GST are extra at actuals."),
@@ -603,7 +772,7 @@ def build_home():
   <div>
     <div class="eyebrow">Chandigarh<i></i>Panchkula<i></i>Mohali<i></i>Punjab<i></i>Haryana</div>
     <h1>Cab Service &amp; <em>Self-Drive</em> Car Rental in Chandigarh</h1>
-    <p class="lead">One-way drops, round trips, airport transfers, hourly local cabs and self-drive cars — honest per-km fares and a bro on call 24×7.</p>
+    <p class="lead">City rides across the tricity, one-way &amp; round-trip outstation cabs, airport transfers and self-drive cars — instant fares, online booking and a bro on call 24×7.</p>
     {chips()}
     <div class="hero-cta"><a class="btn btn-primary" href="#book">Get instant fare</a><a class="btn btn-ghost" href="{wa()}" rel="noopener">{ICONS["wa"]}Chat on WhatsApp</a></div>
   </div>
@@ -611,9 +780,12 @@ def build_home():
 </div></section>
 
 <section><div class="container">
-  <div class="sec-head"><span class="kicker">Two ways to ride</span><h2>Sit back, or take the wheel</h2><p>Choose a chauffeur-driven cab anywhere in Chandigarh, Punjab and Haryana – or drive yourself with a self-drive car from Chandigarh.</p></div>
+  <div class="sec-head"><span class="kicker">Three ways to ride</span><h2>Across town, out of town, or behind the wheel</h2><p>Book a city ride inside the tricity, a chauffeur-driven outstation cab anywhere in Punjab, Haryana &amp; Himachal – or drive yourself with a self-drive car from Chandigarh.</p></div>
   <div class="modes">
-    <a class="mode dark" href="{p}car-rental-with-driver/"><h3>Cab with Driver</h3><p>Hatchbacks to Tempo Travellers with experienced drivers.</p>
+    <a class="mode light" href="{p}local-taxi-chandigarh/"><h3>City Ride</h3><p>Point-to-point rides in Chandigarh, Mohali, Panchkula &amp; Zirakpur.</p>
+      <ul><li>Pin pickup &amp; drop on the map</li><li>Instant fare, ride now or later</li><li>No app download needed</li></ul>
+      <span class="go">From {inr(min(c["cityMin"] for c in CAB_CARS if c.get("cityKm")))} →</span>{car_svg("hatch", "car-art")}</a>
+    <a class="mode dark" href="{p}car-rental-with-driver/"><h3>Outstation Cabs</h3><p>Hatchbacks to Tempo Travellers with experienced drivers.</p>
       <ul><li>One way &amp; round trip outstation</li><li>Local 4 hr / 8 hr packages</li><li>Airport &amp; railway transfers</li></ul>
       <span class="go">From ₹{CHEAP_CAB["km"]}/km →</span>{car_svg("sedan", "car-art")}</a>
     <a class="mode amber" href="{p}self-drive-car-rental-chandigarh/"><h3>Self Drive · Chandigarh</h3><p>Your car, your playlist, your pace.</p>
@@ -762,7 +934,7 @@ def build_driver():
     def body(p):
         return hero_small(p, ["Car rental with driver"], "Car Rental <em>with Driver</em> in Chandigarh",
                           f"One-way drops, round trips and hourly local cabs from Chandigarh, Panchkula and Mohali to anywhere in Punjab, Haryana, Himachal and Delhi. From ₹{CHEAP_CAB['km']}/km, driver included.",
-                          booking()) + f'''
+                          booking(tab="cab")) + f'''
 <section><div class="container">
   <div class="sec-head"><span class="kicker">Fleet</span><h2>Pick your cab</h2><p>All cars are AC, commercially insured and driven by verified professionals.</p></div>
   {cab_cards(p)}
@@ -794,7 +966,7 @@ def build_city(c):
             f'''<section><div class="container"><div class="cta" style="background:#fff;border:1px solid var(--line)"><div><h2>Want to drive yourself?</h2><p>Self-drive cars from {inr(CHEAP_SELF["day"])}/day are available for pickup in Chandigarh, just next door.</p></div><div class="btns"><a class="btn btn-primary" href="{p}self-drive-car-rental-chandigarh/">See self-drive cars</a></div></div></div></section>'''
         from_city = "" if c.get("state") else c["name"]
         return hero_small(p, [c["h1"]], c["h1"].replace(c["name"], f"<em>{c['name']}</em>"),
-                          c["desc"].split(". ")[0] + ".", booking(from_city=from_city)) + f'''
+                          c["desc"].split(". ")[0] + ".", booking(tab="cab" if c.get("state") else "city", from_city=from_city or "Chandigarh")) + f'''
 <section class="bg-white"><div class="container split">
   <div class="prose"><h2>Your local cab partner in {c["name"]}</h2>{intro}
     <h3>{"Cities" if c.get("state") else "Areas"} we cover in {c["name"]}</h3><ul class="pill-list">{areas}</ul></div>
@@ -819,7 +991,7 @@ def build_route(r):
         text = "".join(f"<p>{e(x)}</p>" for x in r["text"])
         return hero_small(p, [f'Chandigarh to {r["to"]} cab'], f'Chandigarh to <em>{r["to"]}</em> Cab',
                           f'{r["km"]} km · {r["time"]}. One-way sedan from {inr(oneway(CAB["sedan"], r["km"]))} including driver. Book a one way drop or {rt_label.lower()} 24×7.',
-                          booking(dest=r["to"])) + f'''
+                          booking(tab="cab", dest=r["to"])) + f'''
 <section><div class="container">
   <div class="sec-head"><span class="kicker">Fare chart</span><h2>Chandigarh to {r["to"]} taxi fare</h2><p>Estimates include driver allowance. Toll, parking, state tax &amp; GST extra.</p></div>
   <div class="table-wrap"><table><thead><tr><th>Car</th><th class="num">One way</th><th class="num">{rt_label}</th><th class="num">Rate</th></tr></thead><tbody>{rows}</tbody></table></div>
@@ -835,6 +1007,37 @@ def build_route(r):
     page(r["slug"] + "/", f'Chandigarh to {r["to"]} Cab | One Way Taxi from {inr(oneway(CAB["hatch"], r["km"]))} – BroDrive',
          f'Book Chandigarh to {r["to"]} taxi – one way from {inr(oneway(CAB["hatch"], r["km"]))}, sedan {inr(oneway(CAB["sedan"], r["km"]))}, SUV & Innova Crysta. {r["km"]} km, {r["time"]}. Verified drivers, 24×7 booking on WhatsApp.',
          body, [faq_schema(r["faqs"]), crumbs_schema([("Home", ""), (f'Chandigarh to {r["to"]} cab', r["slug"] + "/")])])
+
+def build_service(sv):
+    def body(p):
+        pts = "".join(f"<li>{ICONS['check']}{x}</li>" for x in sv["points"])
+        intro = "".join(f"<p>{e(x)}</p>" for x in sv["intro"])
+        c = sv["cards"]
+        if c == "city":
+            rows = "".join(f'<tr><td><b>{x["name"]}</b><small>{x["models"]}</small></td><td class="num">{inr(x["cityBase"])}</td><td class="num">₹{x["cityKm"]}/km</td><td class="num">{inr(x["cityMin"])}</td><td class="num">{inr(max(x["cityMin"], x["cityBase"] + 5 * x["cityKm"]))}</td><td class="num">{inr(max(x["cityMin"], x["cityBase"] + 15 * x["cityKm"]))}</td></tr>' for x in CAB_CARS if x.get("cityKm"))
+            cards = f'<div class="table-wrap"><table><thead><tr><th>Ride</th><th class="num">Base</th><th class="num">Per km</th><th class="num">Minimum</th><th class="num">5 km ride</th><th class="num">15 km ride</th></tr></thead><tbody>{rows}</tbody></table></div><p class="muted" style="margin-top:10px">Night charge {RULES["cityNightPct"]}% (10 PM–6 AM). Tolls &amp; parking extra.</p>'
+        elif c == "self":
+            cards = self_cards(p)
+        elif c in ("cab", "both"):
+            cards = cab_cards(p) + (f'<h3 style="margin-top:40px">Self-drive cars</h3>' + self_cards(p) if c == "both" else "")
+        else:
+            cards = cab_cards(p).replace('<div class="fleet">', '<div class="fleet">', 1)
+        others = "".join(f'<li><a href="{p}{x["slug"]}/">{x["short"]}</a></li>' for x in SERVICES if x is not sv)
+        return hero_small(p, [re.sub("<[^>]+>", "", sv["h1"]).replace("&amp;", "&")], sv["h1"], sv["lead"],
+                          booking(tab=sv["tab"], dest=sv.get("dest"), cab_car=sv.get("cab_car", "sedan"), self_car=sv.get("self_car", "sedan"))) + f"""
+<section class="bg-white"><div class="container split">
+  <div class="prose"><h2>Why book with BroDrive</h2>{intro}<ul class="ticks">{pts}</ul></div>
+  <aside class="aside-card"><h3>Book in a minute</h3><p>See your fare instantly and confirm online, or talk to us.</p>
+    <a class="btn btn-primary" href="#book" style="width:100%;margin-bottom:10px">Get fare &amp; book</a>
+    <a class="btn btn-wa" href="{wa()}" rel="noopener" style="width:100%">{ICONS["wa"]}WhatsApp {e(SITE["phone_display"])}</a></aside>
+</div></section>
+<section><div class="container"><div class="sec-head"><h2>Prices</h2></div>{cards}</div></section>
+<section class="bg-white"><div class="container"><div class="sec-head"><h2>Popular trips from Chandigarh</h2></div>{routes_grid(p, ["Shimla", "Kasauli", "Manali", "Delhi", "Amritsar", "Haridwar"])}</div></section>
+<section><div class="container"><div class="sec-head"><h2>FAQs</h2></div>{faq_html(sv["faqs"])}
+  <h3 style="margin-top:36px">More from BroDrive</h3><ul class="pill-list">{others}</ul></div></section>
+{cta(p)}"""
+    plain = re.sub("<[^>]+>", "", sv["h1"]).replace("&amp;", "&")
+    page(sv["slug"] + "/", sv["title"], sv["desc"], body, [faq_schema(sv["faqs"]), crumbs_schema([("Home", ""), (plain, sv["slug"] + "/")])])
 
 def build_terms():
     def body(p):
@@ -886,6 +1089,9 @@ def build_assets():
     urls = "".join(f"<url><loc>{SITE['base_url']}/{u}</loc><lastmod>{TODAY}</lastmod><priority>{prio.get(u, '0.7')}</priority></url>\n" for u in PAGES)
     with open(os.path.join(ROOT, "sitemap.xml"), "w", encoding="utf-8") as f:
         f.write(f'<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n{urls}</urlset>\n')
+    if SITE.get("indexnow_key"):
+        with open(os.path.join(ROOT, SITE["indexnow_key"] + ".txt"), "w") as f:
+            f.write(SITE["indexnow_key"])
     with open(os.path.join(ROOT, "robots.txt"), "w", encoding="utf-8") as f:
         f.write(f"User-agent: *\nAllow: /\nDisallow: /admin/\n\nSitemap: {SITE['base_url']}/sitemap.xml\n")
 
@@ -905,5 +1111,6 @@ if __name__ == "__main__":
     build_home(); build_rates(); build_self(); build_driver()
     for c in CITIES: build_city(c)
     for r in ROUTES: build_route(r)
+    for sv in SERVICES: build_service(sv)
     build_terms(); build_404(); build_assets(); build_backend()
     print(f"Built {len(PAGES)} pages + 404.html, sitemap.xml, robots.txt, assets/js/rates.js")

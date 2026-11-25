@@ -13,12 +13,15 @@
  * =================================================================================== */
 
 var TZ = 'Asia/Kolkata';
+var CATALOG_KEY = 'catalog-v2'; // bump when the catalog shape changes so old cached copies are ignored
 var STATUSES = ['New', 'Confirmed', 'Ongoing', 'Completed', 'Cancelled'];
 var B_COLS = ['id', 'created', 'status', 'service', 'trip', 'pickup', 'address', 'destination', 'km', 'start', 'when', 'end', 'days',
   'carId', 'carName', 'estimate', 'fareDetail', 'name', 'mobile', 'email', 'notes',
-  'vehicleNo', 'driverName', 'driverPhone', 'finalFare', 'adminNotes', 'updated', 'history'];
+  'vehicleNo', 'driverName', 'driverPhone', 'finalFare', 'adminNotes', 'updated', 'history', 'until', 'pickupGeo', 'dropGeo'];
 var V_COLS = ['type', 'id', 'name', 'models', 'seats', 'bags', 'trans', 'fuel', 'icon', 'image', 'active', 'sort',
-  'km', 'da', 'hr', 'transfer', 'local4h', 'local8h', 'day', 'half', 'xkm', 'dep', 'age'];
+  'km', 'da', 'hr', 'transfer', 'local4h', 'local8h', 'day', 'half', 'xkm', 'dep', 'age', 'cityBase', 'cityKm', 'cityMin'];
+var F_COLS = ['regNo', 'vehicleType', 'vehicleId', 'model', 'driverName', 'driverPhone', 'active', 'notes'];
+var CITY_BOX = { minLat: 30.55, maxLat: 30.92, minLng: 76.55, maxLng: 77.05 }; // Chandigarh tricity + Zirakpur/Kharar/Pinjore
 var ADMIN_EDITABLE = ['status', 'vehicleNo', 'driverName', 'driverPhone', 'finalFare', 'adminNotes'];
 
 /* ---------- Run this once from the editor (it asks for permissions) ---------- */
@@ -95,6 +98,7 @@ var ADMIN = {
     } finally { lock.releaseLock(); }
   },
   vehicles: function () {
+    seed_();
     return { ok: true, vehicles: rows_(sheet_('Vehicles', V_COLS)).map(veh_) };
   },
   saveVehicle: function (b) {
@@ -118,14 +122,15 @@ var ADMIN = {
       ['models', 'seats', 'bags', 'trans', 'fuel', 'icon', 'image'].forEach(function (k) { rec[k] = str_(v[k], k === 'image' ? 500 : 80); });
       rec.active = v.active === false || v.active === 'false' ? 'FALSE' : 'TRUE';
       rec.sort = v.sort !== undefined && v.sort !== '' ? Number(v.sort) || 0 : (existing ? existing.sort : maxSort + 1);
-      var nums = type === 'cab' ? ['km', 'da', 'hr', 'transfer', 'local4h', 'local8h'] : ['day', 'half', 'xkm', 'dep', 'age'];
+      var nums = type === 'cab' ? ['km', 'da', 'hr', 'transfer', 'local4h', 'local8h', 'cityBase', 'cityKm', 'cityMin'] : ['day', 'half', 'xkm', 'dep', 'age'];
+      if (type === 'cab') ['cityBase', 'cityKm', 'cityMin'].forEach(function (k) { if (v[k] === '' || v[k] === undefined) v[k] = 0; });
       nums.forEach(function (k) {
         var n = Number(v[k]);
         if (v[k] === '' || v[k] === undefined || isNaN(n) || n < 0) throw new Error('Please enter a valid number for ' + k);
         rec[k] = n;
       });
       write_(sh, rec, V_COLS);
-      CacheService.getScriptCache().remove('catalog');
+      CacheService.getScriptCache().remove(CATALOG_KEY);
       return { ok: true, vehicle: veh_(rec) };
     } finally { lock.releaseLock(); }
   },
@@ -136,7 +141,40 @@ var ADMIN = {
       rows_(sh).forEach(function (r) { if (String(r.type) === b.type && String(r.id) === b.id) row = r._row; });
       if (!row) throw new Error('Vehicle not found');
       sh.deleteRow(row);
-      CacheService.getScriptCache().remove('catalog');
+      CacheService.getScriptCache().remove(CATALOG_KEY);
+      return { ok: true };
+    } finally { lock.releaseLock(); }
+  },
+  fleet: function () {
+    return { ok: true, fleet: rows_(sheet_('Fleet', F_COLS)).map(fleet_) };
+  },
+  saveFleet: function (b) {
+    var f = b.car || {};
+    var reg = str_(f.regNo, 20).toUpperCase().replace(/\s+/g, ' ');
+    if (!reg) throw new Error('Registration number is required');
+    var original = str_(b.original || reg, 20).toUpperCase().replace(/\s+/g, ' ');
+    var lock = LockService.getScriptLock(); lock.waitLock(15000);
+    try {
+      var sh = sheet_('Fleet', F_COLS), list = rows_(sh), rec = null;
+      list.forEach(function (r) { if (String(r.regNo).toUpperCase() === original) rec = r; });
+      if (b.isNew && rec) throw new Error(reg + ' is already in your fleet');
+      if (reg !== original && list.some(function (r) { return String(r.regNo).toUpperCase() === reg; })) throw new Error(reg + ' is already in your fleet');
+      rec = rec || { _row: 0 };
+      rec.regNo = reg;
+      rec.vehicleType = f.vehicleType === 'self' ? 'self' : 'cab';
+      ['vehicleId', 'model', 'driverName', 'driverPhone', 'notes'].forEach(function (k) { rec[k] = str_(f[k], k === 'notes' ? 300 : 80); });
+      rec.active = f.active === false ? 'FALSE' : 'TRUE';
+      write_(sh, rec, F_COLS);
+      return { ok: true, car: fleet_(rec) };
+    } finally { lock.releaseLock(); }
+  },
+  deleteFleet: function (b) {
+    var lock = LockService.getScriptLock(); lock.waitLock(15000);
+    try {
+      var sh = sheet_('Fleet', F_COLS), row = 0;
+      rows_(sh).forEach(function (r) { if (String(r.regNo).toUpperCase() === String(b.regNo).toUpperCase()) row = r._row; });
+      if (!row) throw new Error('Car not found');
+      sh.deleteRow(row);
       return { ok: true };
     } finally { lock.releaseLock(); }
   },
@@ -151,14 +189,14 @@ var ADMIN = {
       if (current[k]) sh.getRange(current[k]._row, 2).setValue(n);
       else sh.appendRow([k, n]);
     });
-    CacheService.getScriptCache().remove('catalog');
+    CacheService.getScriptCache().remove(CATALOG_KEY);
     return { ok: true, rules: rules_() };
   }
 };
 
 /* ---------- Public: catalog ---------- */
 function catalog_() {
-  var cache = CacheService.getScriptCache(), hit = cache.get('catalog');
+  var cache = CacheService.getScriptCache(), hit = cache.get(CATALOG_KEY);
   if (hit) return JSON.parse(hit);
   seed_();
   var vs = rows_(sheet_('Vehicles', V_COLS)).map(veh_).filter(function (v) { return v.active; });
@@ -170,7 +208,7 @@ function catalog_() {
     rules: rules_(),
     updated: stamp_(new Date())
   };
-  try { cache.put('catalog', JSON.stringify(out), 300); } catch (e) {}
+  try { cache.put(CATALOG_KEY, JSON.stringify(out), 300); } catch (e) {}
   return out;
 }
 
@@ -194,7 +232,28 @@ function book_(b) {
     address: str_(b.address, 250), notes: str_(b.notes, 400), history: stamp_(now) + ' – Booked on website'
   };
 
-  if (b.service === 'self') {
+  if (b.service === 'city') {
+    car = pick_(cat.cab, b.carId);
+    if (!(car.cityKm > 0)) throw new Error('This car is not available for city rides. Please choose another.');
+    var pg = geo_(b.pickupGeo), dg = geo_(b.dropGeo);
+    if (!pg || !dg) throw new Error('Please set both pickup and drop locations.');
+    if (!inCity_(pg) || !inCity_(dg)) throw new Error('City rides are available within Chandigarh, Mohali, Panchkula and Zirakpur. For other places please book Outstation.');
+    var hv = hav_(pg, dg), ckm = Number(b.km) || 0;
+    if (!(ckm >= hv * 0.9 && ckm <= hv * 3 + 3)) ckm = hv * 1.35;
+    ckm = Math.max(1, Math.round(ckm * 10) / 10);
+    if (ckm > R.cityMaxKm) throw new Error('This trip is longer than a city ride. Please book Outstation.');
+    var st = b.when === 'later' ? parse_(b.date + 'T' + (b.time || '09:00')) : new Date(now.getTime() + 20 * 6e4);
+    if (!st) throw new Error('Please choose the ride date and time.');
+    if (st < new Date(now.getTime() - 2 * 36e5)) throw new Error('Pickup time is in the past.');
+    res = BroFare.city(car, ckm, Number(Utilities.formatDate(st, TZ, 'HH')), R);
+    rec.service = 'City ride';
+    rec.trip = b.when === 'later' ? 'City ride (scheduled)' : 'City ride (ride now)';
+    rec.pickup = str_(b.pickup, 150) || 'Pinned on map';
+    rec.destination = str_(b.drop, 150) || 'Pinned on map';
+    rec.km = ckm; rec.days = 1;
+    rec.start = fmt_(st); rec.when = stamp_(st); rec.until = stamp_(new Date(st.getTime() + 2 * 36e5));
+    rec.pickupGeo = pg.join(','); rec.dropGeo = dg.join(',');
+  } else if (b.service === 'self') {
     car = pick_(cat.self, b.carId);
     var s = parse_(b.start), en = parse_(b.end);
     if (!s || !en) throw new Error('Please choose pickup and return date & time.');
@@ -204,7 +263,7 @@ function book_(b) {
     rec.service = 'Self drive';
     rec.trip = 'Self drive' + (b.delivery ? ' + doorstep delivery' : '') + (b.unlimited ? ' + unlimited km' : '');
     rec.pickup = 'Chandigarh';
-    rec.start = fmt_(s); rec.when = stamp_(s); rec.end = fmt_(en); rec.days = res.days;
+    rec.start = fmt_(s); rec.when = stamp_(s); rec.end = fmt_(en); rec.until = stamp_(en); rec.days = res.days;
     rec.km = res.freeKm + (res.freeKm === 'Unlimited' ? '' : ' km free');
   } else {
     car = pick_(cat.cab, b.carId);
@@ -220,6 +279,10 @@ function book_(b) {
       if (d2 < d0) throw new Error('Return date can’t be before the pickup date.');
       days = Math.round((d2 - d0) / 864e5) + 1;
       rec.end = Utilities.formatDate(d2, TZ, 'EEE, d MMM yyyy');
+      rec.until = stamp_(new Date(d2.getTime() + 24 * 36e5 - 6e4));
+    } else {
+      var hrs = trip === 'local' ? (b.pkg === '4h' ? 4 : 8) : Math.ceil(km / 40 * 2) + 1; // one way: driver's return included
+      rec.until = stamp_(new Date(d1.getTime() + hrs * 36e5));
     }
     res = BroFare.cab(car, trip, km, days, b.pkg === '4h' ? '4h' : '8h', R);
     rec.service = 'Cab with driver';
@@ -250,6 +313,7 @@ function rowsHtml_(rec) {
     ['Booking ID', '<b>' + esc_(rec.id) + '</b>'], ['Status', esc_(rec.status)], ['Service', esc_(rec.service)], ['Trip', esc_(rec.trip)],
     ['Pickup', esc_(rec.pickup) + (rec.address ? '<br><span style="color:#5C6578">' + esc_(rec.address) + '</span>' : '')],
     ['Drop', esc_(rec.destination) + (rec.km && rec.destination ? ' (~' + esc_(rec.km) + ' km)' : '')],
+    ['Route map', rec.pickupGeo && rec.dropGeo ? '<a href="https://www.google.com/maps/dir/?api=1&origin=' + esc_(rec.pickupGeo) + '&destination=' + esc_(rec.dropGeo) + '">Open in Google Maps</a>' : ''],
     [rec.service === 'Self drive' ? 'Pickup time' : 'Date & time', esc_(rec.start)],
     [rec.service === 'Self drive' ? 'Return time' : 'Return date', esc_(rec.end)],
     ['Car', esc_(rec.carName)],
@@ -326,7 +390,14 @@ function db_() {
 
 function sheet_(name, cols) {
   var ss = db_(), sh = ss.getSheetByName(name);
-  if (!sh) { sh = ss.insertSheet(name); head_(sh, cols); }
+  if (!sh) { sh = ss.insertSheet(name); head_(sh, cols); return sh; }
+  // Add any new columns (from app updates) to an existing sheet
+  var w = sh.getLastColumn(), have = w ? sh.getRange(1, 1, 1, w).getValues()[0].map(String) : [];
+  var missing = cols.filter(function (c) { return have.indexOf(c) < 0; });
+  if (missing.length) {
+    sh.getRange(1, w + 1, 1, missing.length).setValues([missing]).setFontWeight('bold').setBackground('#FFB703');
+    sh.getRange(1, w + 1, sh.getMaxRows(), missing.length).setNumberFormat('@');
+  }
   return sh;
 }
 
@@ -346,8 +417,9 @@ function rows_(sh) {
 }
 
 function write_(sh, rec, cols) {
-  var row = cols.map(function (k) { return rec[k] === undefined || rec[k] === null ? '' : rec[k]; });
-  if (rec._row) sh.getRange(rec._row, 1, 1, cols.length).setValues([row]);
+  var head = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(String);
+  var row = head.map(function (k) { return rec[k] === undefined || rec[k] === null ? '' : rec[k]; });
+  if (rec._row) sh.getRange(rec._row, 1, 1, head.length).setValues([row]);
   else { sh.appendRow(row); rec._row = sh.getLastRow(); }
 }
 
@@ -369,6 +441,17 @@ function seed_() {
     });
     vs.getRange(2, 1, rows.length, V_COLS.length).setValues(rows);
   }
+  if (!prop_('MIGRATED_CITY')) {
+    var byId = {};
+    DEFAULTS.cab.forEach(function (c) { byId[c.id] = c; });
+    rows_(vs).forEach(function (r) {
+      var d = byId[r.id];
+      if (r.type === 'cab' && d && (r.cityKm === '' || r.cityKm === undefined)) {
+        r.cityBase = d.cityBase; r.cityKm = d.cityKm; r.cityMin = d.cityMin; write_(vs, r, V_COLS);
+      }
+    });
+    PropertiesService.getScriptProperties().setProperty('MIGRATED_CITY', '1');
+  }
   var st = sheet_('Settings', ['key', 'value']);
   if (st.getLastRow() < 2) {
     var kv = Object.keys(DEFAULTS.rules).map(function (k) { return [k, DEFAULTS.rules[k]]; });
@@ -385,6 +468,7 @@ function veh_(r) {
   if (v.type === 'cab') {
     v.bags = String(r.bags || ''); v.km = n('km'); v.da = n('da'); v.hr = n('hr'); v.transfer = n('transfer');
     v.local = { '4h': n('local4h'), '8h': n('local8h') };
+    v.cityBase = n('cityBase'); v.cityKm = n('cityKm'); v.cityMin = n('cityMin');
   } else {
     v.trans = String(r.trans || ''); v.fuel = String(r.fuel || ''); v.day = n('day'); v.half = n('half');
     v.xkm = n('xkm'); v.dep = n('dep'); v.age = n('age');
@@ -405,6 +489,20 @@ function auth_(key) {
   var k = prop_('ADMIN_KEY');
   if (!k) throw new Error('Admin password not set. In Apps Script: Project Settings → Script properties → add ADMIN_KEY.');
   if (String(key || '') !== k) { Utilities.sleep(1500); throw new Error('Wrong password'); }
+}
+function fleet_(r) {
+  return { regNo: String(r.regNo), vehicleType: String(r.vehicleType || 'cab'), vehicleId: String(r.vehicleId || ''), model: String(r.model || ''),
+    driverName: String(r.driverName || ''), driverPhone: String(r.driverPhone || ''), active: String(r.active).toUpperCase() !== 'FALSE', notes: String(r.notes || '') };
+}
+function geo_(s) {
+  var m = String(s || '').split(',').map(Number);
+  return m.length === 2 && isFinite(m[0]) && isFinite(m[1]) && Math.abs(m[0]) <= 90 && Math.abs(m[1]) <= 180 ? [Math.round(m[0] * 1e5) / 1e5, Math.round(m[1] * 1e5) / 1e5] : null;
+}
+function inCity_(g) { return g[0] >= CITY_BOX.minLat && g[0] <= CITY_BOX.maxLat && g[1] >= CITY_BOX.minLng && g[1] <= CITY_BOX.maxLng; }
+function hav_(a, b) {
+  var R = 6371, r = Math.PI / 180, dLat = (b[0] - a[0]) * r, dLng = (b[1] - a[1]) * r;
+  var x = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(a[0] * r) * Math.cos(b[0] * r) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
+  return 2 * R * Math.asin(Math.sqrt(x));
 }
 function prop_(k) { return PropertiesService.getScriptProperties().getProperty(k); }
 function ownerEmail_() { return prop_('OWNER_EMAIL') || Session.getEffectiveUser().getEmail(); }
@@ -513,7 +611,21 @@ var BroFare = (function () {
     };
   }
 
-  return { inr: inr, cab: cab, self: self };
+  /* City ride (point to point inside the tricity). hour = pickup hour 0-23 (IST). */
+  function city(car, km, hour, R) {
+    km = Math.round(km * 10) / 10;
+    var kmFare = Math.round(km * car.cityKm);
+    var lines = [['Base fare', car.cityBase], [km + ' km \u00D7 ' + inr(car.cityKm), kmFare]];
+    var total = car.cityBase + kmFare;
+    if (total < car.cityMin) { lines.push(['Minimum fare top-up', car.cityMin - total]); total = car.cityMin; }
+    if ((hour >= 22 || hour < 6) && R.cityNightPct) {
+      var n = Math.round(total * R.cityNightPct / 100);
+      lines.push(['Night charge 10 PM\u20136 AM (' + R.cityNightPct + '%)', n]); total += n;
+    }
+    return { total: total, lines: lines, km: km, note: 'Point-to-point ride, driver & fuel included. Tolls/parking extra. Waiting beyond 5 min: ' + inr(car.hr) + '/hour.' };
+  }
+
+  return { inr: inr, cab: cab, self: self, city: city };
 })();
 
 /* ---------- Default fleet & rules (seeded on first run) ---------- */
@@ -533,7 +645,10 @@ var DEFAULTS = {
    "local": {
     "4h": 999,
     "8h": 1799
-   }
+   },
+   "cityBase": 49,
+   "cityKm": 13,
+   "cityMin": 129
   },
   {
    "id": "sedan",
@@ -549,7 +664,10 @@ var DEFAULTS = {
    "local": {
     "4h": 1199,
     "8h": 1999
-   }
+   },
+   "cityBase": 59,
+   "cityKm": 15,
+   "cityMin": 149
   },
   {
    "id": "suv",
@@ -565,7 +683,10 @@ var DEFAULTS = {
    "local": {
     "4h": 1599,
     "8h": 2699
-   }
+   },
+   "cityBase": 79,
+   "cityKm": 19,
+   "cityMin": 229
   },
   {
    "id": "innova",
@@ -581,7 +702,10 @@ var DEFAULTS = {
    "local": {
     "4h": 1899,
     "8h": 3199
-   }
+   },
+   "cityBase": 99,
+   "cityKm": 21,
+   "cityMin": 279
   },
   {
    "id": "crysta",
@@ -597,7 +721,10 @@ var DEFAULTS = {
    "local": {
     "4h": 2199,
     "8h": 3699
-   }
+   },
+   "cityBase": 119,
+   "cityKm": 24,
+   "cityMin": 329
   },
   {
    "id": "tempo",
@@ -613,7 +740,10 @@ var DEFAULTS = {
    "local": {
     "4h": 3299,
     "8h": 5499
-   }
+   },
+   "cityBase": 0,
+   "cityKm": 0,
+   "cityMin": 0
   }
  ],
  "self": [
@@ -732,6 +862,8 @@ var DEFAULTS = {
   "disc30": 20,
   "deliveryFee": 399,
   "freeDeliveryDays": 3,
+  "cityNightPct": 25,
+  "cityMaxKm": 60,
   "lateFeePerHour": 300,
   "cleaningFee": 500,
   "smokingFee": 2000,

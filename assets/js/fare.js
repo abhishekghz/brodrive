@@ -78,5 +78,19 @@ var BroFare = (function () {
     };
   }
 
-  return { inr: inr, cab: cab, self: self };
+  /* City ride (point to point inside the tricity). hour = pickup hour 0-23 (IST). */
+  function city(car, km, hour, R) {
+    km = Math.round(km * 10) / 10;
+    var kmFare = Math.round(km * car.cityKm);
+    var lines = [['Base fare', car.cityBase], [km + ' km \u00D7 ' + inr(car.cityKm), kmFare]];
+    var total = car.cityBase + kmFare;
+    if (total < car.cityMin) { lines.push(['Minimum fare top-up', car.cityMin - total]); total = car.cityMin; }
+    if ((hour >= 22 || hour < 6) && R.cityNightPct) {
+      var n = Math.round(total * R.cityNightPct / 100);
+      lines.push(['Night charge 10 PM\u20136 AM (' + R.cityNightPct + '%)', n]); total += n;
+    }
+    return { total: total, lines: lines, km: km, note: 'Point-to-point ride, driver & fuel included. Tolls/parking extra. Waiting beyond 5 min: ' + inr(car.hr) + '/hour.' };
+  }
+
+  return { inr: inr, cab: cab, self: self, city: city };
 })();

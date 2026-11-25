@@ -36,7 +36,7 @@ SITE = {
     "region": "Chandigarh",
     "postal": "160022",
     "lat": 30.7333, "lng": 76.7794,
-    "google_verification": "",            # paste the code from Google Search Console here
+    "google_verification": "fgplibgB_P7zll76VSmptWwDQ9nSjtpIuXEACbqZx0Q",            # paste the code from Google Search Console here
     "indexnow_key": "d88bc06cc741f12a40462e5b5845e098",  # public key for IndexNow (instant Bing/Yandex indexing)
     "instagram": "", "facebook": "",
 }

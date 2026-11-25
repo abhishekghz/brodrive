@@ -18,8 +18,10 @@
   <a class="brand" href="../" aria-label="BroDrive website"><svg viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="16" fill="#FFB703"/><path d="M28 15h11.5a8.5 8.5 0 0 1 0 17H28zM28 32h13.5a8.5 8.5 0 0 1 0 17H28z" fill="none" stroke="#0B0F17" stroke-width="6.5" stroke-linejoin="round"/><path d="M10 24h8M7 32h11M10 40h8" stroke="#0B0F17" stroke-width="4" stroke-linecap="round"/></svg><span class="brand-word">Bro<b>Drive</b></span><span class="adm-badge">Admin</span></a>
   <nav class="adm-tabs" aria-label="Admin sections" hidden>
     <button type="button" data-view="bookings" aria-current="page">Bookings <span class="count" data-new-count></span></button>
+    <button type="button" data-view="live">Live</button>
     <button type="button" data-view="schedule">Schedule</button>
     <button type="button" data-view="fleet">My cars</button>
+    <button type="button" data-view="partners">Partners <span class="count" data-pending-count></span></button>
     <button type="button" data-view="vehicles">Prices &amp; vehicles</button>
     <button type="button" data-view="rules">Pricing rules</button>
   </nav>
@@ -59,6 +61,22 @@
       <tbody data-bookings></tbody>
     </table></div>
     <p class="empty" data-bookings-empty hidden>No bookings match.</p>
+  </section>
+
+  <!-- Live tracking -->
+  <section data-section="live" hidden>
+    <div class="adm-head"><div><h1>Live</h1><p class="muted" data-live-sub>Cars sharing their location right now. Refreshes every 20 seconds.</p></div></div>
+    <div class="live-map" id="live-map"></div>
+    <div class="vgrid" data-live style="margin-top:14px"></div>
+  </section>
+
+  <!-- Partners -->
+  <section data-section="partners" hidden>
+    <div class="adm-head">
+      <div><h1>Partners</h1><p class="muted">Car owners and drivers who registered on <a data-partner-link target="_blank" rel="noopener">your partner page</a>. Check their papers, then approve them and each car.</p></div>
+      <div class="adm-head-actions"><button type="button" class="btn btn-ghost btn-sm" data-copy-partner>Copy partner page link</button></div>
+    </div>
+    <div class="vgrid" data-partners></div>
   </section>
 
   <!-- Schedule -->
@@ -114,6 +132,9 @@
         <div class="grid2">
           <label class="fld full"><span>Assign one of my cars</span><select name="assign"><option value="">— choose a car (fills the fields below) —</option></select></label>
           <p class="clash full" data-clash hidden></p>
+          <input type="hidden" name="partnerId">
+          <label class="fld" data-payout-row><span>Partner payout (₹)</span><input name="partnerPayout" inputmode="numeric"></label>
+          <label class="fld" data-payout-row><span>Payout status</span><select name="payoutStatus"><option>Pending</option><option>Paid</option></select></label>
           <label class="fld full"><span>Status</span><select name="status"></select></label>
           <label class="fld"><span>Vehicle number</span><input name="vehicleNo" placeholder="CH01 AB 1234"></label>
           <label class="fld"><span>Final fare (₹)</span><input name="finalFare" inputmode="numeric" placeholder="e.g. 3500"></label>
@@ -143,6 +164,17 @@
   </form>
 </dialog>
 
+<!-- Partner dialog -->
+<dialog class="adm-dialog" data-partner-dlg>
+  <div class="dlg-inner">
+    <div class="dlg-head"><div><h2 data-pt-title></h2><p class="muted" data-pt-sub></p></div><button type="button" class="dlg-x" data-close aria-label="Close">×</button></div>
+    <div class="decide" data-pt-actions></div>
+    <div data-pt-body></div>
+    <label class="fld" style="margin-top:12px"><span>Internal notes</span><textarea rows="2" data-pt-notes></textarea></label>
+    <p class="book-error" data-pt-error role="alert"></p>
+  </div>
+</dialog>
+
 <!-- Fleet car dialog -->
 <dialog class="adm-dialog narrow" data-car-dialog>
   <form class="dlg-inner" data-car-form>
@@ -165,6 +197,9 @@
 
 <script src="../assets/js/rates.js"></script>
 <script src="../assets/js/fare.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="../assets/js/trackmap.js"></script>
 <script src="../assets/js/admin.js" defer></script>
 </body>
 </html>

@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en-IN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Attach Your Car with BroDrive | Partner Portal</title>
+<meta name="description" content="Own a car or taxi in Chandigarh, Mohali or Panchkula? Attach it with BroDrive, get regular bookings, track your rides and earnings, and get paid on UPI.">
+<meta name="theme-color" content="#0B0F17">
+<link rel="icon" href="../assets/img/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/img/apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../assets/css/style.css">
+<link rel="stylesheet" href="../assets/css/admin.css">
+<style>
+.p-hero{background:var(--ink);color:#fff;padding:34px 0 40px}
+.p-hero h1{color:#fff;margin:0 0 8px}.p-hero h1 em{font-style:normal;color:var(--amber)}
+.p-hero p{color:#C9D0DD;max-width:60ch;margin:0}
+.p-perks{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));margin-top:20px}
+.p-perks div{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:12px;padding:12px 14px;font-size:.92rem;color:#E7EBF2}
+.p-perks b{display:block;color:var(--amber);font-family:var(--display)}
+.auth{max-width:460px;margin:-20px auto 40px;position:relative}
+.auth .book-tabs{grid-template-columns:1fr 1fr;border-radius:18px 18px 0 0;overflow:hidden}
+.auth form{border-radius:0 0 18px 18px;display:grid;gap:12px}
+.p-top{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;margin-bottom:14px}
+.p-top h1{margin:0;font-size:1.7rem}
+.p-tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px}
+.p-tabs button{border:1px solid var(--line);background:#fff;border-radius:999px;padding:9px 16px;font:600 .92rem var(--font);cursor:pointer}
+.p-tabs button[aria-current]{background:var(--ink);color:#fff;border-color:var(--ink)}
+.ride{background:#fff;border:1px solid var(--line);border-radius:16px;padding:16px;display:grid;gap:8px}
+.ride h3{margin:0;font-size:1.05rem;display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.ride .meta{color:var(--muted);font-size:.9rem}
+.ride .acts{display:flex;gap:8px;flex-wrap:wrap}
+.ride .acts .btn-ghost{color:var(--ink)}
+.rides{display:grid;gap:12px}
+.docs{list-style:none;margin:8px 0 0;padding:0;display:grid;gap:6px;font-size:.88rem}
+.docs li{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;border-bottom:1px dashed var(--line);padding:5px 0}
+.docs .ok{color:var(--ok);font-weight:700}.docs .miss{color:#B45309;font-weight:700}.docs .bad{color:#B91C1C;font-weight:700}
+.up{position:relative;overflow:hidden;display:inline-flex}
+.up input{position:absolute;inset:0;opacity:0;cursor:pointer}
+.status-note{border-radius:12px;padding:12px 14px;font-size:.92rem;margin-bottom:14px}
+.status-note.pending{background:#FFF7E6;border:1px solid #F6DE9A}
+.status-note.ok{background:#DCFCE7;border:1px solid #86EFAC}
+.status-note.bad{background:#FEE2E2;border:1px solid #FCA5A5}
+fieldset.f{border:1px solid var(--line);border-radius:14px;padding:14px;margin:0 0 12px}
+fieldset.f legend{font:700 1rem var(--display);padding:0 6px}
+.muted-s{color:var(--muted);font-size:.84rem;margin:0}
+</style>
+</head>
+<body class="admin">
+<header class="site-header"><div class="container hdr">
+  <a class="brand" href="../" aria-label="BroDrive website"><svg viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="16" fill="#FFB703"/><path d="M28 15h11.5a8.5 8.5 0 0 1 0 17H28zM28 32h13.5a8.5 8.5 0 0 1 0 17H28z" fill="none" stroke="#0B0F17" stroke-width="6.5" stroke-linejoin="round"/><path d="M10 24h8M7 32h11M10 40h8" stroke="#0B0F17" stroke-width="4" stroke-linecap="round"/></svg><span class="brand-word">Bro<b>Drive</b></span><span class="adm-badge">Partner</span></a>
+  <button type="button" class="btn btn-ghost btn-sm adm-logout" data-logout hidden>Log out</button>
+</div></header>
+
+<section class="p-hero" data-intro><div class="container">
+  <h1>Attach your car with <em>BroDrive</em></h1>
+  <p>Own a car, taxi or Tempo Traveller in the Chandigarh tricity? Register free, upload your papers once, set your own rates – and get bookings from BroDrive customers.</p>
+  <div class="p-perks">
+    <div><b>Regular bookings</b>City rides, airport and outstation trips</div>
+    <div><b>Your rates</b>Per km, daily rate, toll &amp; night charges</div>
+    <div><b>See every rupee</b>Earnings per ride, paid &amp; pending</div>
+    <div><b>Paid on UPI</b>Payouts straight to your UPI ID</div>
+  </div>
+</div></section>
+
+<main class="container">
+  <!-- Login / register -->
+  <section class="auth" data-auth>
+    <div class="book-card">
+      <div class="book-tabs" role="tablist">
+        <button type="button" role="tab" data-atab="register" aria-selected="true">Register<small>New partner</small></button>
+        <button type="button" role="tab" data-atab="login" aria-selected="false">Log in<small>Already registered</small></button>
+      </div>
+      <form class="book-pane" data-form="register" novalidate>
+        <label class="fld"><span>Full name *</span><input name="name" id="r-name" autocomplete="name" required></label>
+        <div class="grid2">
+          <label class="fld"><span>Mobile *</span><input name="mobile" id="r-mobile" type="tel" inputmode="tel" autocomplete="tel" required></label>
+          <label class="fld"><span>Email</span><input name="email" id="r-email" type="email" autocomplete="email"></label>
+          <label class="fld"><span>City</span><input name="city" id="r-city" placeholder="Chandigarh / Mohali / Panchkula"></label>
+          <label class="fld"><span>I am</span><select name="kind" id="r-kind"><option>Owner-driver</option><option>Fleet owner (many cars)</option><option>Driver (no car)</option></select></label>
+        </div>
+        <label class="fld"><span>UPI ID (for payouts)</span><input name="upi" id="r-upi" placeholder="name@okaxis"></label>
+        <div class="grid2">
+          <label class="fld"><span>Create password *</span><input name="password" id="r-pw" type="password" autocomplete="new-password" minlength="6" required></label>
+          <label class="fld"><span>Repeat password *</span><input name="password2" id="r-pw2" type="password" autocomplete="new-password" required></label>
+        </div>
+        <label class="chk"><input type="checkbox" name="agree" id="r-agree"> I confirm my car has valid commercial papers and I agree to BroDrive’s partner terms.</label>
+        <input class="hp" name="website" tabindex="-1" autocomplete="off" aria-hidden="true">
+        <p class="book-error" role="alert"></p>
+        <button type="submit" class="btn btn-primary" style="width:100%">Create partner account</button>
+      </form>
+      <form class="book-pane" data-form="login" hidden novalidate>
+        <label class="fld"><span>Mobile</span><input name="mobile" id="l-mobile" type="tel" inputmode="tel" autocomplete="tel" required></label>
+        <label class="fld"><span>Password</span><input name="password" id="l-pw" type="password" autocomplete="current-password" required></label>
+        <p class="book-error" role="alert"></p>
+        <button type="submit" class="btn btn-primary" style="width:100%">Log in</button>
+        <p class="muted-s">Forgot your password? Call/WhatsApp BroDrive and we’ll reset it.</p>
+      </form>
+    </div>
+  </section>
+
+  <!-- Dashboard -->
+  <section data-dash hidden style="padding-top:26px;padding-bottom:50px">
+    <div class="p-top"><div><h1 data-hello>Hi</h1><p class="muted" data-pid></p></div><button type="button" class="btn btn-dark btn-sm" data-reload>Refresh</button></div>
+    <div data-status></div>
+    <nav class="p-tabs" aria-label="Partner sections">
+      <button type="button" data-ptab="rides" aria-current="page">Rides &amp; earnings</button>
+      <button type="button" data-ptab="cars">My cars</button>
+      <button type="button" data-ptab="profile">Profile &amp; papers</button>
+    </nav>
+    <div data-pview="rides"></div>
+    <div data-pview="cars" hidden></div>
+    <div data-pview="profile" hidden></div>
+  </section>
+</main>
+
+<!-- Car dialog -->
+<dialog class="adm-dialog narrow" data-car-dlg>
+  <form class="dlg-inner" data-car-form novalidate>
+    <div class="dlg-head"><h2 data-car-title>Add car</h2><button type="button" class="dlg-x" data-close aria-label="Close">×</button></div>
+    <fieldset class="f"><legend>Car</legend><div class="grid2">
+      <label class="fld"><span>Registration no. *</span><input name="regNo" id="c-reg" placeholder="CH01 AB 1234"></label>
+      <label class="fld"><span>Make &amp; model *</span><input name="model" id="c-model" placeholder="Maruti Dzire"></label>
+      <label class="fld"><span>Category</span><select name="category" id="c-cat"></select></label>
+      <label class="fld"><span>Year</span><input name="year" id="c-year" inputmode="numeric" placeholder="2022"></label>
+      <label class="fld"><span>Seats (excl. driver)</span><input name="seats" id="c-seats" inputmode="numeric" placeholder="4"></label>
+      <label class="fld"><span>Fuel</span><select name="fuel" id="c-fuel"><option>Petrol</option><option>Diesel</option><option>CNG</option><option>Petrol + CNG</option><option>Electric</option></select></label>
+      <label class="fld"><span>AC</span><select name="ac" id="c-ac"><option>Yes</option><option>No</option></select></label>
+      <label class="fld"><span>Roof carrier</span><select name="carrier" id="c-carrier"><option>No</option><option>Yes</option></select></label>
+    </div></fieldset>
+    <fieldset class="f"><legend>Driver</legend><div class="grid2">
+      <label class="fld"><span>Driver name</span><input name="driverName" id="c-dname" placeholder="Leave empty if you drive"></label>
+      <label class="fld"><span>Driver mobile</span><input name="driverPhone" id="c-dphone" inputmode="tel"></label>
+    </div></fieldset>
+    <fieldset class="f"><legend>Your rates</legend><div class="grid2">
+      <label class="fld"><span>Per km (outstation) ₹</span><input name="perKm" id="c-perkm" inputmode="decimal" placeholder="11"></label>
+      <label class="fld"><span>Daily rate (8 hrs / 80 km) ₹</span><input name="dayRate" id="c-day" inputmode="decimal" placeholder="1800"></label>
+      <label class="fld"><span>Driver allowance per day ₹</span><input name="da" id="c-da" inputmode="decimal" placeholder="300"></label>
+      <label class="fld"><span>Night charge ₹</span><input name="nightCharge" id="c-night" inputmode="decimal" placeholder="250"></label>
+      <label class="fld full"><span>Toll &amp; parking</span><select name="tollIncluded" id="c-toll"><option value="Extra">Extra – paid by customer</option><option value="Included">Included in my rate</option></select></label>
+    </div></fieldset>
+    <fieldset class="f"><legend>Paper expiry dates</legend><div class="grid2">
+      <label class="fld"><span>Insurance valid till</span><input type="date" name="insExp" id="c-ins"></label>
+      <label class="fld"><span>Permit type</span><select name="permitType" id="c-ptype"><option>Taxi (state)</option><option>All India tourist</option><option>Contract carriage</option><option>Private (self-drive rental)</option><option>None</option></select></label>
+      <label class="fld"><span>Permit valid till</span><input type="date" name="permitExp" id="c-pexp"></label>
+      <label class="fld"><span>PUC valid till</span><input type="date" name="pucExp" id="c-puc"></label>
+      <label class="fld"><span>Fitness valid till</span><input type="date" name="fitExp" id="c-fit"></label>
+      <label class="fld"><span>Notes</span><input name="notes" id="c-notes" placeholder="e.g. FASTag, music system"></label>
+    </div></fieldset>
+    <label class="chk"><input type="checkbox" name="active" id="c-active" checked> Available for bookings</label>
+    <p class="muted-s">Save the car, then upload the RC, insurance, permit, PUC and photos from the car card.</p>
+    <p class="book-error" role="alert"></p>
+    <div class="dlg-actions"><button type="submit" class="btn btn-primary">Save car</button><button type="button" class="btn btn-ghost" data-close>Cancel</button></div>
+  </form>
+</dialog>
+
+<div class="toast" data-toast role="status" aria-live="polite"></div>
+<script src="../assets/js/rates.js"></script>
+<script src="../assets/js/fare.js"></script>
+<script src="../assets/js/partner.js" defer></script>
+</body>
+</html>

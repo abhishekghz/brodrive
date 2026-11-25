@@ -50,7 +50,23 @@ Free Gmail can send about 100 emails a day through Apps Script. That covers roug
 5. Click **Deploy → New deployment**. Choose the ⚙️ type **Web app**, set *Execute as* **Me** and *Who has access* **Anyone**, then click **Deploy**. Copy the **Web app URL** (it ends in `/exec`).
 6. Put that URL in `SITE["api_url"]` in `tools/build.py`, then run `python3 tools/build.py` and push. Or just send the URL to Claude.
 
-**Updating the backend later:** paste the new `backend/Code.gs`, then go to **Deploy → Manage deployments → ✏️ → Version: New version → Deploy**. The URL stays the same.
+**Updating the backend later:** paste the new `backend/Code.gs` and save. If the new version needs extra permissions (it does when it starts using Google Drive), run `setup` once and click Allow. Then go to **Deploy → Manage deployments → ✏️ → Version: New version → Deploy**. The URL stays the same.
+
+## Live tracking
+
+- Every booking gets two private links: a **customer tracking link** (sent in the confirmation email and WhatsApp) and a **driver link**.
+- In the admin panel, open a booking and click **Send driver link**. The driver opens it on their phone and taps **Start sharing location**, then **I've arrived → Start trip → End trip**.
+- The customer page (`/track/`) shows the car moving on the map, the route taken, km covered, speed, distance left and arrival time, plus a "Share my trip" button for family.
+- The admin **Live** tab shows every confirmed or ongoing car on one map.
+- **Limitation:** phones only send location while the driver page is open on screen. If the driver switches apps or locks the phone, updates pause, and missed points are sent when they come back. For self-drive cars, or for tracking that never pauses, fit a hardware GPS tracker (about ₹1,500–3,000 per car).
+
+## Partners (attach other people's cars)
+
+- Share **/partner/** (e.g. https://abhishekghz.github.io/brodrive/partner/) with car owners and drivers. They register, add their cars and rates, and upload their papers: RC, insurance, permit, PUC, fitness, licence, Aadhaar and photos. Papers are saved privately in your Google Drive, in the folder *BroDrive – Partner documents*.
+- In the admin **Partners** tab, review the papers (expired ones are flagged), then approve the partner and each car. Approved partner cars appear in the "Assign one of my cars" list.
+- When you assign a partner car, the payout is suggested as fare minus your commission (**Pricing rules → commission %**, default 15%). The partner gets an email, and sees the ride, the customer pickup details and a Start-trip button on their dashboard.
+- Partners see only their own rides and their earnings per ride. Mark payouts **Paid** in the booking to update their dashboard.
+- A forgotten partner password: Partners → Review → **Reset password** (sends a new one on WhatsApp).
 
 ## Moving to GoDaddy
 

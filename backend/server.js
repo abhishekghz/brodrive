@@ -15,12 +15,20 @@ var CATALOG_KEY = 'catalog-v2'; // bump when the catalog shape changes so old ca
 var STATUSES = ['New', 'Confirmed', 'Ongoing', 'Completed', 'Cancelled'];
 var B_COLS = ['id', 'created', 'status', 'service', 'trip', 'pickup', 'address', 'destination', 'km', 'start', 'when', 'end', 'days',
   'carId', 'carName', 'estimate', 'fareDetail', 'name', 'mobile', 'email', 'notes',
-  'vehicleNo', 'driverName', 'driverPhone', 'finalFare', 'adminNotes', 'updated', 'history', 'until', 'pickupGeo', 'dropGeo'];
+  'vehicleNo', 'driverName', 'driverPhone', 'finalFare', 'adminNotes', 'updated', 'history', 'until', 'pickupGeo', 'dropGeo',
+  'trackToken', 'driverToken', 'tripStatus', 'kmCovered', 'startedAt', 'endedAt', 'partnerId', 'partnerPayout', 'payoutStatus'];
+var T_COLS = ['id', 'ts', 'lat', 'lng', 'acc', 'spd', 'phase']; // GPS points, one sheet per month: "Tracks yyMM"
 var V_COLS = ['type', 'id', 'name', 'models', 'seats', 'bags', 'trans', 'fuel', 'icon', 'image', 'active', 'sort',
   'km', 'da', 'hr', 'transfer', 'local4h', 'local8h', 'day', 'half', 'xkm', 'dep', 'age', 'cityBase', 'cityKm', 'cityMin'];
-var F_COLS = ['regNo', 'vehicleType', 'vehicleId', 'model', 'driverName', 'driverPhone', 'active', 'notes'];
+var F_COLS = ['regNo', 'vehicleType', 'vehicleId', 'model', 'driverName', 'driverPhone', 'active', 'notes',
+  'partnerId', 'carStatus', 'year', 'seats', 'fuel', 'ac', 'carrier', 'perKm', 'dayRate', 'da', 'tollIncluded', 'nightCharge',
+  'rcFile', 'insFile', 'insExp', 'permitFile', 'permitType', 'permitExp', 'pucFile', 'pucExp', 'fitFile', 'fitExp', 'photos', 'updated'];
+var P_COLS = ['id', 'created', 'status', 'name', 'mobile', 'email', 'city', 'kind', 'upi', 'pwHash', 'salt', 'session', 'sessionExp',
+  'dlNo', 'dlExp', 'dlFile', 'aadhaarFile', 'photoFile', 'folderId', 'adminNotes', 'updated'];
+var CAR_FILES = ['rcFile', 'insFile', 'permitFile', 'pucFile', 'fitFile', 'photos'];
+var PARTNER_FILES = ['dlFile', 'aadhaarFile', 'photoFile'];
 var CITY_BOX = { minLat: 30.55, maxLat: 30.92, minLng: 76.55, maxLng: 77.05 }; // Chandigarh tricity + Zirakpur/Kharar/Pinjore
-var ADMIN_EDITABLE = ['status', 'vehicleNo', 'driverName', 'driverPhone', 'finalFare', 'adminNotes'];
+var ADMIN_EDITABLE = ['status', 'vehicleNo', 'driverName', 'driverPhone', 'finalFare', 'adminNotes', 'partnerId', 'partnerPayout', 'payoutStatus'];
 
 /* ---------- Run this once from the editor (it asks for permissions) ---------- */
 function setup() {
@@ -43,6 +51,7 @@ function doGet(e) {
   var a = (e && e.parameter && e.parameter.action) || '';
   try {
     if (a === 'catalog') return json_(catalog_());
+    if (a === 'track') return json_(track_(e.parameter));
     return json_({ ok: true, service: 'BroDrive API' });
   } catch (x) { return json_({ ok: false, error: msg_(x) }); }
 }
@@ -52,6 +61,9 @@ function doPost(e) {
     var b = JSON.parse((e && e.postData && e.postData.contents) || '{}');
     var a = b.action;
     if (a === 'book') return json_(book_(b));
+    if (a === 'ping') return json_(ping_(b));
+    if (PARTNER[a]) return json_(PARTNER[a](b));
+    if (a === 'track') return json_(track_(b));
     if (a === 'catalog') return json_(catalog_());
     var fn = ADMIN[a];
     if (!fn) throw new Error('Unknown action');
@@ -78,21 +90,81 @@ var ADMIN = {
       var sh = sheet_('Bookings', B_COLS), rec = null;
       rows_(sh).forEach(function (r) { if (String(r.id) === String(b.id)) rec = r; });
       if (!rec) throw new Error('Booking not found');
-      var f = b.fields || {}, changes = [];
+      var f = b.fields || {}, changes = [], newPartner = '';
       ADMIN_EDITABLE.forEach(function (k) {
         if (!(k in f)) return;
         var v = str_(f[k], k === 'adminNotes' ? 1000 : 120);
         if (k === 'status' && STATUSES.indexOf(v) < 0) throw new Error('Invalid status');
-        if (k === 'finalFare' && v !== '' && isNaN(Number(v))) throw new Error('Final fare must be a number');
+        if ((k === 'finalFare' || k === 'partnerPayout') && v !== '' && isNaN(Number(v))) throw new Error(k === 'finalFare' ? 'Final fare must be a number' : 'Partner payout must be a number');
+        if (k === 'payoutStatus' && v && ['Pending', 'Paid'].indexOf(v) < 0) throw new Error('Invalid payout status');
+        if (k === 'partnerId' && v !== String(rec.partnerId || '')) newPartner = v;
         if (String(rec[k]) !== v) { changes.push(k + ': ' + (v || '—')); rec[k] = v; }
       });
       var now = stamp_(new Date());
       rec.updated = now;
       if (changes.length) rec.history = String(rec.history || '') + '\n' + now + ' – ' + changes.join(', ');
       write_(sh, rec, B_COLS);
+      CacheService.getScriptCache().remove('bk:' + rec.id);
       var emailed = false;
       if (b.notify && rec.email) { mailCustomerUpdate_(rec); emailed = true; }
+      if (newPartner) { try { mailPartnerJob_(newPartner, rec); } catch (e) { console.error(e); } }
       return { ok: true, booking: clean_(rec), emailed: emailed };
+    } finally { lock.releaseLock(); }
+  },
+  partners: function () {
+    var cars = rows_(sheet_('Fleet', F_COLS)).map(fleet_);
+    var list = rows_(sheet_('Partners', P_COLS)).map(function (r) {
+      var o = pubPartner_(r); o.cars = cars.filter(function (c) { return c.partnerId === o.id; }); return o;
+    }).reverse();
+    return { ok: true, partners: list };
+  },
+  savePartner: function (b) {
+    var sh = sheet_('Partners', P_COLS), rec = null;
+    rows_(sh).forEach(function (r) { if (String(r.id) === String(b.id)) rec = r; });
+    if (!rec) throw new Error('Partner not found');
+    var out = { ok: true };
+    if (b.status) {
+      if (['Pending', 'Approved', 'Suspended', 'Rejected'].indexOf(b.status) < 0) throw new Error('Invalid status');
+      rec.status = b.status;
+      if (b.status !== 'Approved') rec.session = rec.status === 'Suspended' ? '' : rec.session;
+    }
+    if ('adminNotes' in b) rec.adminNotes = str_(b.adminNotes, 1000);
+    if (b.resetPassword) { var temp = 'BD' + Math.floor(100000 + Math.random() * 900000); rec.salt = tok_(); rec.pwHash = hash_(temp, rec.salt); rec.session = ''; out.tempPassword = temp; }
+    rec.updated = stamp_(new Date());
+    write_(sh, rec, P_COLS);
+    if (b.status) {
+      var fs = sheet_('Fleet', F_COLS);
+      rows_(fs).forEach(function (c) {
+        if (String(c.partnerId) !== rec.id) return;
+        if (b.status === 'Suspended' || b.status === 'Rejected') { c.active = 'FALSE'; write_(fs, c, F_COLS); }
+      });
+    }
+    out.partner = pubPartner_(rec);
+    return out;
+  },
+  live: function () {
+    var out = [];
+    rows_(sheet_('Bookings', B_COLS)).forEach(function (r) {
+      if (['Confirmed', 'Ongoing'].indexOf(String(r.status)) < 0) return;
+      var t = trackState_(String(r.id));
+      out.push({ id: r.id, name: r.name, mobile: r.mobile, service: r.service, trip: r.trip, pickup: r.pickup, destination: r.destination,
+        start: r.start, when: r.when, vehicleNo: r.vehicleNo, driverName: r.driverName, driverPhone: r.driverPhone, status: r.status,
+        tripStatus: r.tripStatus, trackToken: r.trackToken, last: t.last, km: t.km, tripKm: t.tripKm });
+    });
+    return { ok: true, live: out, now: Date.now() };
+  },
+  links: function (b) {
+    var lock = LockService.getScriptLock(); lock.waitLock(15000);
+    try {
+      var sh = sheet_('Bookings', B_COLS), rec = null;
+      rows_(sh).forEach(function (r) { if (String(r.id) === String(b.id)) rec = r; });
+      if (!rec) throw new Error('Booking not found');
+      if (!rec.trackToken || !rec.driverToken) {
+        rec.trackToken = rec.trackToken || tok_(); rec.driverToken = rec.driverToken || tok_();
+        write_(sh, rec, B_COLS);
+        CacheService.getScriptCache().remove('bk:' + rec.id);
+      }
+      return { ok: true, trackToken: rec.trackToken, driverToken: rec.driverToken, trackUrl: trackUrl_(rec), driverUrl: driverUrl_(rec) };
     } finally { lock.releaseLock(); }
   },
   vehicles: function () {
@@ -161,7 +233,11 @@ var ADMIN = {
       rec.regNo = reg;
       rec.vehicleType = f.vehicleType === 'self' ? 'self' : 'cab';
       ['vehicleId', 'model', 'driverName', 'driverPhone', 'notes'].forEach(function (k) { rec[k] = str_(f[k], k === 'notes' ? 300 : 80); });
+      carFields_(rec, f);
       rec.active = f.active === false ? 'FALSE' : 'TRUE';
+      if (f.carStatus) rec.carStatus = ['Approved', 'Pending', 'Rejected'].indexOf(f.carStatus) >= 0 ? f.carStatus : rec.carStatus;
+      if (!rec.carStatus) rec.carStatus = 'Approved'; // your own cars need no verification
+      rec.updated = stamp_(new Date());
       write_(sh, rec, F_COLS);
       return { ok: true, car: fleet_(rec) };
     } finally { lock.releaseLock(); }
@@ -227,7 +303,8 @@ function book_(b) {
   var cat = catalog_(), R = cat.rules, now = new Date(), res, car;
   var rec = {
     id: newId_(now), created: stamp_(now), status: 'New', name: name, mobile: mobile, email: email,
-    address: str_(b.address, 250), notes: str_(b.notes, 400), history: stamp_(now) + ' – Booked on website'
+    address: str_(b.address, 250), notes: str_(b.notes, 400), history: stamp_(now) + ' – Booked on website',
+    trackToken: tok_(), driverToken: tok_(), tripStatus: ''
   };
 
   if (b.service === 'city') {
@@ -319,7 +396,9 @@ function rowsHtml_(rec) {
     ['Final fare', rec.finalFare ? '<b>' + BroFare.inr(Number(rec.finalFare)) + '</b>' : ''],
     ['Vehicle no.', esc_(rec.vehicleNo)], ['Driver', esc_(rec.driverName) + (rec.driverPhone ? ' · ' + esc_(rec.driverPhone) : '')],
     ['Customer', esc_(rec.name) + ' · ' + esc_(rec.mobile) + (rec.email ? ' · ' + esc_(rec.email) : '')],
-    ['Notes', esc_(rec.notes)]
+    ['Notes', esc_(rec.notes)],
+    ['Live tracking', rec.trackToken && ['Cancelled', 'Completed'].indexOf(rec.status) < 0 ? '<a href="' + trackUrl_(rec) + '">Track this ride live</a>' : ''],
+    ['Km covered', rec.kmCovered ? esc_(rec.kmCovered) + ' km' : '']
   ];
   return '<table cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;font-size:14px">' + rows.filter(function (r) { return r[1]; }).map(function (r) {
     return '<tr><td style="padding:8px 12px 8px 0;color:#5C6578;vertical-align:top;white-space:nowrap;border-bottom:1px solid #EEE">' + r[0] + '</td><td style="padding:8px 0;border-bottom:1px solid #EEE">' + r[1] + '</td></tr>';
@@ -341,6 +420,7 @@ function mailOwnerNew_(rec) {
     to: ownerEmail_(), name: 'BroDrive Website', replyTo: rec.email || undefined,
     subject: 'New booking ' + rec.id + ' – ' + rec.name + ' – ' + rec.service + ' – ' + rec.start,
     htmlBody: wrap_('New booking received', '<p>Call the customer to confirm, then update the status in the admin panel.</p>' + rowsHtml_(rec) +
+      (rec.driverToken ? '<p style="font-size:13px;color:#5C6578">Driver tracking link (send to the driver): <a href="' + driverUrl_(rec) + '">' + driverUrl_(rec) + '</a></p>' : '') +
       '<p style="margin-top:18px"><a href="tel:+91' + rec.mobile + '" style="background:#FFB703;color:#0B0F17;padding:10px 16px;border-radius:999px;text-decoration:none;font-weight:bold">Call ' + esc_(rec.name) + '</a> &nbsp; ' +
       '<a href="https://wa.me/91' + rec.mobile + '" style="background:#1FAF54;color:#fff;padding:10px 16px;border-radius:999px;text-decoration:none;font-weight:bold">WhatsApp</a></p>')
   });
@@ -371,6 +451,331 @@ function mailCustomerUpdate_(rec) {
     subject: (rec.status === 'Confirmed' ? 'Booking confirmed' : 'Booking ' + String(rec.status).toLowerCase()) + ' – ' + rec.id + ' | BroDrive',
     htmlBody: wrap_(heads[rec.status] || 'Booking update', (intro[rec.status] || '<p>Here are the latest details of your booking.</p>') + rowsHtml_(rec))
   });
+}
+
+
+
+/* ===================== Partners (car owners / drivers) ===================== */
+var PARTNER = {
+  pRegister: function (b) {
+    var name = str_(b.name, 80), mobile = mob_(b.mobile), email = str_(b.email, 120), pw = String(b.password || '');
+    if (!name) throw new Error('Please enter your full name.');
+    if (!/^[6-9]\d{9}$/.test(mobile)) throw new Error('Please enter a valid 10-digit mobile number.');
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error('Please enter a valid email address.');
+    if (pw.length < 6) throw new Error('Password must be at least 6 characters.');
+    if (b.website) return { ok: true };
+    var rec, lock = LockService.getScriptLock(); lock.waitLock(15000);
+    try {
+      var sh = sheet_('Partners', P_COLS);
+      if (rows_(sh).some(function (r) { return mob_(r.mobile) === mobile; })) throw new Error('This mobile number is already registered. Please log in instead.');
+      var salt = tok_(), now = new Date();
+      rec = { _row: 0, id: 'P' + Utilities.formatDate(now, TZ, 'yyMM') + '-' + newId_(now).slice(-4), created: stamp_(now), status: 'Pending',
+        name: name, mobile: mobile, email: email, city: str_(b.city, 60), kind: str_(b.kind, 40), upi: str_(b.upi, 80),
+        salt: salt, pwHash: hash_(pw, salt), session: tok_() + tok_(), sessionExp: stamp_(new Date(now.getTime() + 30 * 864e5)), updated: stamp_(now) };
+      write_(sh, rec, P_COLS);
+    } finally { lock.releaseLock(); }
+    try {
+      MailApp.sendEmail({ to: ownerEmail_(), name: 'BroDrive Partners', subject: 'New partner registration – ' + rec.name + ' (' + rec.mobile + ')',
+        htmlBody: wrap_('New partner registered', '<p><b>' + esc_(rec.name) + '</b> · ' + esc_(rec.mobile) + ' · ' + esc_(rec.city) + '</p><p>Review their cars and papers in the admin panel → Partners, then approve.</p>') });
+    } catch (e) { }
+    return { ok: true, token: rec.session, partner: pubPartner_(rec) };
+  },
+  pLogin: function (b) {
+    var mobile = mob_(b.mobile), cache = CacheService.getScriptCache(), ck = 'pl' + mobile, tries = Number(cache.get(ck) || 0);
+    if (tries >= 8) throw new Error('Too many attempts. Please wait 15 minutes or call BroDrive.');
+    var sh = sheet_('Partners', P_COLS), rec = null;
+    rows_(sh).forEach(function (r) { if (mob_(r.mobile) === mobile) rec = r; });
+    if (!rec || hash_(String(b.password || ''), rec.salt) !== rec.pwHash) {
+      cache.put(ck, String(tries + 1), 900); Utilities.sleep(800);
+      throw new Error('Wrong mobile number or password.');
+    }
+    rec.session = tok_() + tok_(); rec.sessionExp = stamp_(new Date(Date.now() + 30 * 864e5));
+    write_(sh, rec, P_COLS);
+    return { ok: true, token: rec.session, partner: pubPartner_(rec) };
+  },
+  pLogout: function (b) {
+    var a = pAuth_(b.token); a.rec.session = ''; write_(a.sh, a.rec, P_COLS); return { ok: true };
+  },
+  pMe: function (b) {
+    var a = pAuth_(b.token), me = a.rec, R = rules_();
+    var cars = rows_(sheet_('Fleet', F_COLS)).filter(function (r) { return String(r.partnerId) === me.id; }).map(fleet_);
+    var rides = rows_(sheet_('Bookings', B_COLS)).filter(function (r) { return String(r.partnerId) === me.id; }).map(function (r) {
+      var active = ['Confirmed', 'Ongoing'].indexOf(String(r.status)) >= 0;
+      return { id: r.id, service: r.service, trip: r.trip, pickup: r.pickup, address: active ? r.address : '', destination: r.destination,
+        pickupGeo: r.pickupGeo, dropGeo: r.dropGeo, start: r.start, when: r.when, end: r.end, carName: r.carName, vehicleNo: r.vehicleNo,
+        status: r.status, tripStatus: r.tripStatus, kmCovered: r.kmCovered, km: r.km, payout: Number(r.partnerPayout) || 0, payoutStatus: r.payoutStatus || 'Pending',
+        customerName: r.name, customerMobile: active ? r.mobile : '', driverName: r.driverName, driverPhone: r.driverPhone,
+        driverUrl: active && r.driverToken ? driverUrl_(r) : '' };
+    }).reverse();
+    var done = rides.filter(function (r) { return r.status === 'Completed'; }), ym = Utilities.formatDate(new Date(), TZ, 'yyyy-MM');
+    var sum = function (l) { return l.reduce(function (t, r) { return t + r.payout; }, 0); };
+    return { ok: true, partner: pubPartner_(me), cars: cars, rides: rides, commissionPct: R.commissionPct, phone: DEFAULTS.phone,
+      totals: { completed: done.length, earned: sum(done), paid: sum(done.filter(function (r) { return r.payoutStatus === 'Paid'; })),
+        pending: sum(done.filter(function (r) { return r.payoutStatus !== 'Paid'; })),
+        month: sum(done.filter(function (r) { return String(r.when).slice(0, 7) === ym; })),
+        upcoming: rides.filter(function (r) { return ['Confirmed', 'Ongoing'].indexOf(r.status) >= 0; }).length } };
+  },
+  pSaveProfile: function (b) {
+    var a = pAuth_(b.token), f = b.fields || {}, me = a.rec;
+    ['name', 'email', 'city', 'kind', 'upi', 'dlNo'].forEach(function (k) { if (k in f) me[k] = str_(f[k], 120); });
+    if ('dlExp' in f) me.dlExp = date_(f.dlExp);
+    if (!me.name) throw new Error('Name is required.');
+    if (f.password) { if (String(f.password).length < 6) throw new Error('Password must be at least 6 characters.'); me.salt = tok_(); me.pwHash = hash_(String(f.password), me.salt); }
+    me.updated = stamp_(new Date());
+    write_(a.sh, me, P_COLS);
+    return { ok: true, partner: pubPartner_(me) };
+  },
+  pSaveCar: function (b) {
+    var a = pAuth_(b.token), f = b.car || {}, me = a.rec;
+    var reg = str_(f.regNo, 20).toUpperCase().replace(/\s+/g, ' '), original = str_(b.original || '', 20).toUpperCase();
+    if (!reg) throw new Error('Registration number is required.');
+    if (!str_(f.model, 80)) throw new Error('Car make & model is required.');
+    var lock = LockService.getScriptLock(); lock.waitLock(15000);
+    try {
+      var sh = sheet_('Fleet', F_COLS), list = rows_(sh), rec = null;
+      list.forEach(function (r) { if (String(r.regNo).toUpperCase() === (original || reg)) rec = r; });
+      if (rec && String(rec.partnerId) !== me.id) throw new Error(reg + ' is already registered with BroDrive. Call us if this is your car.');
+      if (!original && rec) throw new Error(reg + ' is already in your list.');
+      if (original && reg !== original && list.some(function (r) { return String(r.regNo).toUpperCase() === reg; })) throw new Error(reg + ' is already registered.');
+      rec = rec || { _row: 0, carStatus: 'Pending', active: 'TRUE' };
+      rec.regNo = reg; rec.partnerId = me.id; rec.model = str_(f.model, 80);
+      rec.vehicleType = f.vehicleType === 'self' ? 'self' : 'cab'; rec.vehicleId = str_(f.vehicleId, 40);
+      rec.driverName = str_(f.driverName, 80) || me.name; rec.driverPhone = mob_(f.driverPhone) || me.mobile; rec.notes = str_(f.notes, 300);
+      carFields_(rec, f);
+      if ('active' in f) rec.active = f.active === false ? 'FALSE' : 'TRUE';
+      rec.updated = stamp_(new Date());
+      write_(sh, rec, F_COLS);
+      return { ok: true, car: fleet_(rec) };
+    } finally { lock.releaseLock(); }
+  },
+  pDeleteCar: function (b) {
+    var a = pAuth_(b.token), reg = String(b.regNo || '').toUpperCase();
+    var busy = rows_(sheet_('Bookings', B_COLS)).some(function (r) { return String(r.vehicleNo).toUpperCase() === reg && ['New', 'Confirmed', 'Ongoing'].indexOf(String(r.status)) >= 0; });
+    if (busy) throw new Error('This car has upcoming rides. Ask BroDrive to reassign them first.');
+    var sh = sheet_('Fleet', F_COLS), row = 0;
+    rows_(sh).forEach(function (r) { if (String(r.regNo).toUpperCase() === reg && String(r.partnerId) === a.rec.id) row = r._row; });
+    if (!row) throw new Error('Car not found.');
+    sh.deleteRow(row);
+    return { ok: true };
+  },
+  /* Upload a document/photo (base64). Stored privately in the owner's Google Drive. */
+  pUpload: function (b) {
+    var a = pAuth_(b.token), me = a.rec, field = String(b.field || ''), mime = String(b.mime || '');
+    if (['image/jpeg', 'image/png', 'image/webp', 'application/pdf'].indexOf(mime) < 0) throw new Error('Please upload a photo (JPG/PNG) or a PDF.');
+    var bytes = Utilities.base64Decode(String(b.data || ''));
+    if (!bytes.length) throw new Error('Empty file.');
+    if (bytes.length > 6 * 1024 * 1024) throw new Error('File is too large (max 6 MB). Please upload a smaller photo or PDF.');
+    var folder = partnerFolder_(me, a.sh);
+    var target, sh, isCar = b.target === 'car';
+    if (isCar) {
+      if (CAR_FILES.indexOf(field) < 0) throw new Error('Unknown document type.');
+      sh = sheet_('Fleet', F_COLS);
+      rows_(sh).forEach(function (r) { if (String(r.regNo).toUpperCase() === String(b.regNo || '').toUpperCase() && String(r.partnerId) === me.id) target = r; });
+      if (!target) throw new Error('Save the car first, then upload its papers.');
+    } else {
+      if (PARTNER_FILES.indexOf(field) < 0) throw new Error('Unknown document type.');
+      target = me; sh = a.sh;
+    }
+    var label = (isCar ? target.regNo + ' ' : '') + field + ' ' + Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd HHmm');
+    var ext = mime === 'application/pdf' ? '.pdf' : mime === 'image/png' ? '.png' : mime === 'image/webp' ? '.webp' : '.jpg';
+    var file = folder.createFile(Utilities.newBlob(bytes, mime, label + ext));
+    if (field === 'photos') {
+      var list = String(target.photos || '').split(',').filter(Boolean);
+      list.push(file.getId()); target.photos = list.slice(-8).join(',');
+    } else target[field] = file.getId();
+    target.updated = stamp_(new Date());
+    write_(sh, target, isCar ? F_COLS : P_COLS);
+    return { ok: true, field: field, fileId: file.getId(), value: target[field] };
+  }
+};
+
+function pAuth_(token) {
+  token = String(token || '');
+  if (token.length < 20) throw new Error('Please log in again.');
+  var sh = sheet_('Partners', P_COLS), rec = null;
+  rows_(sh).forEach(function (r) { if (String(r.session) === token) rec = r; });
+  if (!rec || (rec.sessionExp && new Date(String(rec.sessionExp).replace(' ', 'T') + ':00+05:30') < new Date())) throw new Error('Please log in again.');
+  if (rec.status === 'Suspended') throw new Error('Your partner account is suspended. Please call BroDrive.');
+  return { sh: sh, rec: rec };
+}
+function pubPartner_(r) {
+  var o = {};
+  P_COLS.forEach(function (k) { if (['pwHash', 'salt', 'session', 'sessionExp', 'folderId'].indexOf(k) < 0) o[k] = r[k] === undefined ? '' : String(r[k]); });
+  return o;
+}
+function carFields_(rec, f) {
+  ['year', 'seats', 'fuel', 'ac', 'carrier', 'tollIncluded', 'permitType'].forEach(function (k) { if (k in f) rec[k] = str_(f[k], 40); });
+  ['perKm', 'dayRate', 'da', 'nightCharge'].forEach(function (k) {
+    if (!(k in f)) return;
+    var n = f[k] === '' ? '' : Number(f[k]);
+    if (n !== '' && (isNaN(n) || n < 0)) throw new Error('Please enter a valid number for ' + k);
+    rec[k] = n;
+  });
+  ['insExp', 'permitExp', 'pucExp', 'fitExp'].forEach(function (k) { if (k in f) rec[k] = date_(f[k]); });
+}
+function date_(v) { v = String(v || '').slice(0, 10); return /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : ''; }
+function mob_(v) { return String(v || '').replace(/\D/g, '').replace(/^(?:91|0)(?=\d{10}$)/, ''); }
+function hash_(pw, salt) {
+  var h = salt + '|' + pw;
+  for (var i = 0; i < 150; i++) h = Utilities.base64Encode(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, h + salt, Utilities.Charset.UTF_8));
+  return h;
+}
+function partnerFolder_(me, sh) {
+  if (me.folderId) { try { return DriveApp.getFolderById(me.folderId); } catch (e) { } }
+  var props = PropertiesService.getScriptProperties(), rootId = props.getProperty('DOCS_FOLDER'), root = null;
+  if (rootId) { try { root = DriveApp.getFolderById(rootId); } catch (e) { } }
+  if (!root) { root = DriveApp.createFolder('BroDrive – Partner documents'); props.setProperty('DOCS_FOLDER', root.getId()); }
+  var f = root.createFolder(me.id + ' – ' + me.name + ' – ' + me.mobile);
+  me.folderId = f.getId(); write_(sh, me, P_COLS);
+  return f;
+}
+function mailPartnerJob_(pid, rec) {
+  var p = null;
+  rows_(sheet_('Partners', P_COLS)).forEach(function (r) { if (String(r.id) === String(pid)) p = r; });
+  if (!p || !p.email) return;
+  MailApp.sendEmail({ to: p.email, name: 'BroDrive', replyTo: ownerEmail_(), subject: 'New ride assigned – ' + rec.id + ' – ' + rec.start,
+    htmlBody: wrap_('New ride for you, ' + esc_(String(p.name).split(' ')[0]),
+      '<p>Open your partner dashboard to see the pickup details and start live tracking when you leave.</p>' +
+      '<p><a href="' + siteUrl_() + '/partner/">Open partner dashboard</a></p>' +
+      '<table style="font-size:14px">' + [['Booking', rec.id], ['Trip', rec.service + ' – ' + rec.trip], ['Pickup', rec.pickup + (rec.address ? ', ' + rec.address : '')],
+        ['Drop', rec.destination], ['Time', rec.start], ['Car', rec.vehicleNo], ['Your payout', rec.partnerPayout ? BroFare.inr(Number(rec.partnerPayout)) : 'as agreed']]
+        .filter(function (r) { return r[1]; }).map(function (r) { return '<tr><td style="color:#5C6578;padding:4px 12px 4px 0">' + r[0] + '</td><td>' + esc_(r[1]) + '</td></tr>'; }).join('') + '</table>') });
+}
+
+/* ===================== Live tracking ===================== */
+function tok_() { return Utilities.getUuid().replace(/-/g, '').slice(0, 20); }
+function siteUrl_() { return String(DEFAULTS.siteUrl || '').replace(/\/$/, ''); }
+function trackUrl_(r) { return siteUrl_() + '/track/?id=' + encodeURIComponent(r.id) + '&k=' + r.trackToken; }
+function driverUrl_(r) { return siteUrl_() + '/drive/?id=' + encodeURIComponent(r.id) + '&k=' + r.driverToken; }
+function trackSheet_(id) {
+  var m = String(id).match(/^BD(\d{4})/);
+  return sheet_('Tracks ' + (m ? m[1] : 'misc'), T_COLS);
+}
+
+/* Booking details for tracking pages, cached for 60 s so polling stays fast. */
+function bookingPublic_(id) {
+  var cache = CacheService.getScriptCache(), hit = cache.get('bk:' + id);
+  if (hit) return JSON.parse(hit);
+  var rec = null;
+  rows_(sheet_('Bookings', B_COLS)).forEach(function (r) { if (String(r.id) === String(id)) rec = r; });
+  if (!rec) return null;
+  var o = {};
+  ['id', 'service', 'trip', 'pickup', 'address', 'destination', 'pickupGeo', 'dropGeo', 'start', 'end', 'carName', 'vehicleNo',
+    'driverName', 'driverPhone', 'status', 'tripStatus', 'name', 'mobile', 'kmCovered'].forEach(function (k) { o[k] = rec[k] === undefined ? '' : String(rec[k]); });
+  o._t = String(rec.trackToken || ''); o._d = String(rec.driverToken || '');
+  cache.put('bk:' + id, JSON.stringify(o), 60);
+  return o;
+}
+
+/* GPS points: [unixSeconds, lat, lng, speedKmh, phase(0 = before trip, 1 = on trip)] */
+function loadPoints_(id) {
+  var v = trackSheet_(id).getDataRange().getValues(); v.shift();
+  return v.filter(function (r) { return String(r[0]) === String(id); })
+    .map(function (r) { return [Number(r[1]), Number(r[2]), Number(r[3]), Number(r[5]) || 0, r[6] === 'trip' || r[6] === 1 || r[6] === '1' ? 1 : 0]; })
+    .sort(function (a, b) { return a[0] - b[0]; });
+}
+function kmOf_(pts) {
+  var km = 0, tripKm = 0;
+  for (var i = 1; i < pts.length; i++) {
+    var d = hav_([pts[i - 1][1], pts[i - 1][2]], [pts[i][1], pts[i][2]]), dt = Math.max(1, pts[i][0] - pts[i - 1][0]);
+    if (d < 0.015 || d / (dt / 3600) > 160) continue; // ignore GPS jitter (<15 m) and impossible jumps (>160 km/h)
+    km += d; if (pts[i][4]) tripKm += d;
+  }
+  return { km: Math.round(km * 10) / 10, tripKm: Math.round(tripKm * 10) / 10 };
+}
+/* Cached track state: recent points (for the map) + km totals. Rebuilt from the sheet on a cache miss. */
+function trackState_(id) {
+  var cache = CacheService.getScriptCache(), hit = cache.get('trk:' + id);
+  if (hit) return JSON.parse(hit);
+  var pts = loadPoints_(id), k = kmOf_(pts);
+  var st = { pts: thin_(pts), km: k.km, tripKm: k.tripKm, last: pts.length ? pts[pts.length - 1] : null };
+  saveState_(id, st);
+  return st;
+}
+function thin_(pts) { // keep the cache value under ~90 KB: halve older points when long
+  while (pts.length > 2200) {
+    var keep = pts.slice(-600), old = pts.slice(0, -600).filter(function (_, i) { return i % 2 === 0; });
+    pts = old.concat(keep);
+  }
+  return pts;
+}
+function saveState_(id, st) { try { CacheService.getScriptCache().put('trk:' + id, JSON.stringify(st), 21600); } catch (e) { } }
+
+/* Public: tracking data for the customer (track token) or the driver (driver token). */
+function track_(p) {
+  p = p || {};
+  var bk = bookingPublic_(String(p.id || ''));
+  if (!bk || !p.k || (p.k !== bk._t && p.k !== bk._d)) throw new Error('This tracking link is not valid.');
+  var asDriver = p.k === bk._d, st = trackState_(bk.id), after = Number(p.after) || 0;
+  var b = {};
+  ['id', 'service', 'trip', 'pickup', 'destination', 'pickupGeo', 'dropGeo', 'start', 'end', 'carName', 'vehicleNo',
+    'driverName', 'driverPhone', 'status', 'tripStatus', 'kmCovered'].forEach(function (k) { b[k] = bk[k]; });
+  b.firstName = String(bk.name).split(' ')[0];
+  if (asDriver) { b.customerName = bk.name; b.customerMobile = bk.mobile; b.address = bk.address; }
+  return { ok: true, role: asDriver ? 'driver' : 'customer', booking: b, phone: DEFAULTS.phone,
+    points: st.pts.filter(function (x) { return x[0] > after; }), last: st.last, km: st.km, tripKm: st.tripKm, now: Math.floor(Date.now() / 1000) };
+}
+
+/* Public (driver token): GPS points + trip events from the driver's phone. */
+function ping_(b) {
+  var bk = bookingPublic_(String(b.id || ''));
+  if (!bk || !b.k || b.k !== bk._d) throw new Error('This driver link is not valid.');
+  if (['Cancelled', 'Completed'].indexOf(bk.status) >= 0) return { ok: true, stopped: true, status: bk.status, tripStatus: bk.tripStatus };
+  var nowS = Math.floor(Date.now() / 1000), phase = bk.tripStatus === 'On trip' ? 1 : 0;
+  var lock = LockService.getScriptLock(); lock.waitLock(15000);
+  try {
+    var st = trackState_(bk.id), lastT = st.last ? st.last[0] : 0;
+    var add = (Array.isArray(b.points) ? b.points : []).slice(0, 300).map(function (q) {
+      return [Math.round(Number(q.t) / 1000), Math.round(Number(q.lat) * 1e5) / 1e5, Math.round(Number(q.lng) * 1e5) / 1e5,
+        Math.min(250, Math.max(0, Math.round(Number(q.spd) || 0))), phase, Math.round(Number(q.acc) || 0)];
+    }).filter(function (q) {
+      return isFinite(q[1]) && isFinite(q[2]) && Math.abs(q[1]) <= 90 && Math.abs(q[2]) <= 180 && q[0] > lastT && q[0] <= nowS + 120 && q[0] > nowS - 86400 && q[5] <= 150;
+    }).sort(function (x, y) { return x[0] - y[0]; });
+    var prev = st.last; // drop GPS glitches: points that would need >160 km/h from the previous good point
+    add = add.filter(function (q) {
+      if (prev) { var d = hav_([prev[1], prev[2]], [q[1], q[2]]); if (d > 0.5 && d / (Math.max(1, q[0] - prev[0]) / 3600) > 160) return false; }
+      prev = q; return true;
+    });
+    if (add.length) {
+      var sh = trackSheet_(bk.id);
+      sh.getRange(sh.getLastRow() + 1, 1, add.length, T_COLS.length).setValues(add.map(function (q) {
+        return [bk.id, q[0], q[1], q[2], q[5], q[3], q[4] ? 'trip' : 'pre'];
+      }));
+      var all = st.pts.concat(add.map(function (q) { return q.slice(0, 5); }));
+      var tail = [st.last].concat(add.map(function (q) { return q.slice(0, 5); })).filter(Boolean), inc = kmOf_(tail);
+      st = { pts: thin_(all), km: Math.round((st.km + inc.km) * 10) / 10, tripKm: Math.round((st.tripKm + inc.tripKm) * 10) / 10, last: all[all.length - 1] };
+      saveState_(bk.id, st);
+    }
+  } finally { lock.releaseLock(); }
+  var ev = b.event || (!bk.tripStatus && add.length ? 'onway' : '');
+  if (ev) tripEvent_(bk.id, ev, st);
+  var nb = bookingPublic_(bk.id);
+  return { ok: true, saved: add.length, km: st.km, tripKm: st.tripKm, status: nb.status, tripStatus: nb.tripStatus };
+}
+
+function tripEvent_(id, ev, st) {
+  var map = { onway: 'Driver on the way', arrived: 'Driver arrived', start: 'On trip', end: 'Trip ended' };
+  if (!map[ev]) return;
+  var rec = null, lock = LockService.getScriptLock(); lock.waitLock(15000);
+  try {
+    var sh = sheet_('Bookings', B_COLS);
+    rows_(sh).forEach(function (r) { if (String(r.id) === String(id)) rec = r; });
+    if (!rec || rec.tripStatus === map[ev]) return;
+    var now = new Date();
+    rec.tripStatus = map[ev];
+    if (ev === 'start') { rec.status = 'Ongoing'; rec.startedAt = stamp_(now); }
+    if (ev === 'end') { rec.status = 'Completed'; rec.endedAt = stamp_(now); rec.kmCovered = st.tripKm || st.km; }
+    rec.updated = stamp_(now);
+    rec.history = String(rec.history || '') + '\n' + stamp_(now) + ' – ' + map[ev] + (ev === 'end' ? ' (' + rec.kmCovered + ' km)' : '') + ' [driver app]';
+    write_(sh, rec, B_COLS);
+    CacheService.getScriptCache().remove('bk:' + id);
+  } finally { lock.releaseLock(); }
+  if (ev === 'end') {
+    try {
+      MailApp.sendEmail({ to: ownerEmail_(), name: 'BroDrive Website', subject: 'Trip ended ' + rec.id + ' – ' + rec.kmCovered + ' km – ' + rec.name,
+        htmlBody: wrap_('Trip ended', '<p>The driver ended the trip. Check the final fare and mark it paid.</p>' + rowsHtml_(rec)) });
+    } catch (e) { console.error(e); }
+  }
 }
 
 /* ---------- Storage helpers ---------- */
@@ -489,8 +894,12 @@ function auth_(key) {
   if (String(key || '') !== k) { Utilities.sleep(1500); throw new Error('Wrong password'); }
 }
 function fleet_(r) {
-  return { regNo: String(r.regNo), vehicleType: String(r.vehicleType || 'cab'), vehicleId: String(r.vehicleId || ''), model: String(r.model || ''),
-    driverName: String(r.driverName || ''), driverPhone: String(r.driverPhone || ''), active: String(r.active).toUpperCase() !== 'FALSE', notes: String(r.notes || '') };
+  var o = {};
+  F_COLS.forEach(function (k) { o[k] = r[k] === undefined || r[k] === null ? '' : String(r[k]); });
+  o.vehicleType = o.vehicleType || 'cab';
+  o.active = String(r.active).toUpperCase() !== 'FALSE';
+  o.carStatus = o.carStatus || (o.partnerId ? 'Pending' : 'Approved');
+  return o;
 }
 function geo_(s) {
   var m = String(s || '').split(',').map(Number);

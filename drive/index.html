@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en-IN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>BroDrive Driver</title>
+<meta name="robots" content="noindex, nofollow">
+<meta name="theme-color" content="#0B0F17">
+<link rel="icon" href="../assets/img/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link rel="stylesheet" href="../assets/css/style.css">
+<link rel="stylesheet" href="../assets/css/track.css">
+</head>
+<body class="trk">
+<header class="trk-head">
+  <span class="brand"><svg viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="16" fill="#FFB703"/><path d="M28 15h11.5a8.5 8.5 0 0 1 0 17H28zM28 32h13.5a8.5 8.5 0 0 1 0 17H28z" fill="none" stroke="#0B0F17" stroke-width="6.5" stroke-linejoin="round"/><path d="M10 24h8M7 32h11M10 40h8" stroke="#0B0F17" stroke-width="4" stroke-linecap="round"/></svg><span class="brand-word">Bro<b>Drive</b></span></span>
+  <span class="tag" id="role">Driver</span>
+</header>
+<div class="trk-map" id="map"><p class="map-hint">Loading map…</p></div>
+<main class="trk-card"><div class="trk-inner" id="app">
+  <p class="trk-sub">Loading booking…</p>
+</div></main>
+
+<script src="../assets/js/rates.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="../assets/js/trackmap.js"></script>
+<script>
+(function () {
+  'use strict';
+  var T = window.BroTrack, esc = T.esc, P = T.params();
+  var app = document.getElementById('app');
+  var QKEY = 'bro-drive-q-' + P.id;
+  var st = { booking: null, km: 0, tripKm: 0, tripStatus: '', status: '', sharing: false, watch: null, queue: [], lastQ: null,
+    lastSent: 0, lastOk: 0, me: null, acc: null, err: '', target: null, routeInfo: null, routeAt: 0, wake: null, busy: false };
+  try { st.queue = JSON.parse(localStorage.getItem(QKEY) || '[]') || []; } catch (e) { st.queue = []; }
+  var m = null, meMarker = null, pickM = null, dropM = null, routeLine = null, layers = {}, firstFix = true;
+  try { m = T.map('map'); document.querySelector('#map .map-hint') && document.querySelector('#map .map-hint').remove(); } catch (e) { }
+
+  function saveQ() { try { localStorage.setItem(QKEY, JSON.stringify(st.queue.slice(-1500))); } catch (e) { } }
+  var isSelf = function () { return st.booking && st.booking.service === 'Self drive'; };
+  var ended = function () { return st.tripStatus === 'Trip ended' || st.status === 'Completed' || st.status === 'Cancelled'; };
+
+  function render() {
+    var b = st.booking;
+    if (!b) return;
+    document.getElementById('role').textContent = isSelf() ? 'Self-drive trip' : 'Driver';
+    var label = ended() ? (st.status === 'Cancelled' ? 'Booking cancelled' : 'Trip ended') :
+      !st.sharing ? 'Not sharing location' : (st.tripStatus || 'Sharing location');
+    var live = st.sharing && Date.now() - st.lastOk < 60000;
+    var targetName = st.tripStatus === 'On trip' || isSelf() ? (b.destination || 'Drop') : (b.pickup || 'Pickup');
+    var navUrl = st.target ? 'https://www.google.com/maps/dir/?api=1&destination=' + st.target[0] + ',' + st.target[1] + '&travelmode=driving'
+      : 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(targetName);
+    var h = '';
+    h += '<div class="trk-status"><span class="dot ' + (live ? 'live' : st.sharing ? 'stale' : '') + '"></span><h1>' + esc(label) + '</h1></div>';
+    h += '<p class="trk-sub">' + esc(b.id) + ' · ' + esc(b.trip) + ' · ' + esc(b.start) + (b.vehicleNo ? ' · <span class="reg">' + esc(b.vehicleNo) + '</span>' : '') + '</p>';
+    if (st.err) h += '<div class="err-box">' + esc(st.err) + '</div>';
+    if (!isSelf()) h += '<div class="who"><div><b>' + esc(b.customerName) + '</b><small>' + esc(b.customerMobile) + (b.address ? ' · ' + esc(b.address) : '') + '</small></div>' +
+      '<a class="btn btn-primary btn-sm" href="tel:+91' + esc(String(b.customerMobile).slice(-10)) + '">Call</a></div>';
+    h += '<ul class="route-list"><li><i class="a"></i><span><b>Pickup</b><br>' + esc(b.pickup) + '</span></li>' +
+      (b.destination ? '<li><i class="b"></i><span><b>Drop</b><br>' + esc(b.destination) + '</span></li>' : '') + '</ul>';
+    h += '<div class="stats"><div class="stat"><span>Trip km</span><b>' + st.tripKm.toFixed(1) + '</b></div>' +
+      '<div class="stat"><span>Total km</span><b>' + st.km.toFixed(1) + '</b></div>' +
+      '<div class="stat"><span>' + (st.routeInfo ? 'To ' + (st.tripStatus === 'On trip' || isSelf() ? 'drop' : 'pickup') : 'GPS') + '</span><b>' +
+      (st.routeInfo ? st.routeInfo.km.toFixed(1) + ' km' : st.acc ? '±' + Math.round(st.acc) + ' m' : '—') + '</b></div>' +
+      '<div class="stat"><span>Unsent</span><b>' + st.queue.length + '</b></div></div>';
+
+    var btns = '';
+    if (ended()) {
+      btns = '<p class="note">Thank you! ' + (st.status === 'Cancelled' ? 'This booking was cancelled.' : 'Trip recorded: ' + st.tripKm.toFixed(1) + ' km.') + ' You can close this page.</p>';
+    } else if (!st.sharing) {
+      btns = '<button class="btn btn-ok big" data-act="share">' + (isSelf() ? 'Start sharing my location' : 'Start sharing location') + '</button>';
+    } else if (st.tripStatus === 'On trip') {
+      btns = '<button class="btn btn-end big" data-act="end">End trip</button>';
+    } else {
+      btns = (isSelf() || st.tripStatus === 'Driver arrived' ? '' : '<button class="btn btn-dark big" data-act="arrived">I’ve arrived at pickup</button>') +
+        '<button class="btn btn-ok big" data-act="start">Start trip' + (isSelf() ? '' : ' (customer on board)') + '</button>';
+    }
+    h += '<div class="acts">' + btns + '</div>';
+    if (!ended()) h += '<div class="acts"><a class="btn btn-ghost dark" target="_blank" rel="noopener" href="' + navUrl + '">Navigate in Google Maps</a></div>';
+    if (!ended()) h += '<p class="note warn"><b>Keep this page open with the screen on.</b> Location stops sending if you switch apps or lock the phone, and resumes when you come back – missed points are sent then. Use the map above to navigate if you can.</p>';
+    app.innerHTML = h;
+  }
+
+  app.addEventListener('click', function (ev) {
+    var b = ev.target.closest('[data-act]'); if (!b || st.busy) return;
+    var a = b.getAttribute('data-act');
+    if (a === 'share') return startSharing();
+    if (a === 'end' && !confirm('End the trip now? Trip km will be recorded as ' + st.tripKm.toFixed(1) + ' km.')) return;
+    sendEvent(a);
+  });
+
+  function startSharing() {
+    if (!navigator.geolocation) { st.err = 'This phone/browser cannot share location. Please call BroDrive.'; return render(); }
+    st.err = '';
+    st.watch = navigator.geolocation.watchPosition(onPos, function (e) {
+      st.err = e.code === 1 ? 'Location permission denied. Allow location for this site in your browser settings, then tap Start again.' : 'Waiting for GPS signal… move to an open area.';
+      if (e.code === 1) { navigator.geolocation.clearWatch(st.watch); st.sharing = false; }
+      render();
+    }, { enableHighAccuracy: true, maximumAge: 5000, timeout: 30000 });
+    st.sharing = true;
+    keepAwake();
+    render();
+  }
+
+  function onPos(p) {
+    var c = p.coords, pt = { t: Date.now(), lat: c.latitude, lng: c.longitude, acc: c.accuracy, spd: c.speed != null && c.speed >= 0 ? c.speed * 3.6 : 0 };
+    st.me = [pt.lat, pt.lng]; st.acc = c.accuracy; st.err = '';
+    if (m) {
+      if (!meMarker) meMarker = window.L.marker(st.me, { icon: T.icon('car'), keyboard: false }).addTo(m); else meMarker.setLatLng(st.me);
+      if (firstFix) { m.setView(st.me, 15); firstFix = false; }
+    }
+    if (c.accuracy <= 150) {
+      var q = st.lastQ;
+      if (!q || pt.t - q.t > 30000 || T.hav([q.lat, q.lng], [pt.lat, pt.lng]) > 0.02) { st.queue.push(pt); st.lastQ = pt; saveQ(); }
+    }
+    if (Date.now() - st.lastSent > 15000) flush();
+    if (Date.now() - st.routeAt > 60000) updateRoute();
+    render();
+  }
+
+  function flush(event) {
+    if (st.busy) return Promise.resolve();
+    if (!st.queue.length && !event) return Promise.resolve();
+    st.busy = true; st.lastSent = Date.now();
+    var batch = st.queue.slice(0, 300);
+    return T.post({ action: 'ping', id: P.id, k: P.k, points: batch, event: event || '' })
+      .then(function (j) {
+        if (!j.ok) throw new Error(j.error || 'Could not send');
+        st.queue = st.queue.slice(batch.length); saveQ();
+        st.lastOk = Date.now(); st.km = j.km || st.km; st.tripKm = j.tripKm || st.tripKm;
+        st.tripStatus = j.tripStatus || st.tripStatus; st.status = j.status || st.status; st.err = '';
+        if (j.stopped || ended()) stopSharing();
+      })
+      .catch(function (x) { st.err = /valid/.test(x.message) ? x.message : 'No internet – ' + st.queue.length + ' points saved, will send when back online.'; })
+      .then(function () { st.busy = false; render(); });
+  }
+  function sendEvent(ev) {
+    if (st.busy) { setTimeout(function () { sendEvent(ev); }, 800); return; }
+    if (st.me && !st.queue.length) st.queue.push({ t: Date.now(), lat: st.me[0], lng: st.me[1], acc: st.acc || 20, spd: 0 });
+    flush(ev).then(function () { st.routeAt = 0; setTarget(); updateRoute(); });
+  }
+  function stopSharing() {
+    if (st.watch != null) navigator.geolocation.clearWatch(st.watch);
+    st.watch = null; st.sharing = false;
+    if (st.wake) { try { st.wake.release(); } catch (e) { } st.wake = null; }
+  }
+
+  function keepAwake() {
+    if (!('wakeLock' in navigator)) return;
+    navigator.wakeLock.request('screen').then(function (w) { st.wake = w; }).catch(function () { });
+  }
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'visible' && st.sharing) { keepAwake(); flush(); }
+  });
+  setInterval(function () { if (st.sharing) flush(); }, 20000);
+
+  /* Where the driver is heading: pickup before the trip, drop during it. */
+  var pickGeo = null, dropGeo = null;
+  function setTarget() {
+    st.target = (st.tripStatus === 'On trip' || isSelf()) ? dropGeo : (pickGeo || dropGeo);
+  }
+  function updateRoute() {
+    setTarget();
+    if (!st.me || !st.target || !m) return;
+    st.routeAt = Date.now();
+    T.route(st.me, st.target).then(function (r) {
+      if (!r) return;
+      st.routeInfo = r;
+      if (routeLine) routeLine.remove();
+      routeLine = window.L.geoJSON(r.geometry, { style: { color: '#2563EB', weight: 4, opacity: 0.6 } }).addTo(m);
+      render();
+    });
+  }
+
+  T.get(P.id, P.k, 0).then(function (j) {
+    if (!j.ok) throw new Error(j.error);
+    if (j.role !== 'driver') throw new Error('This is a customer tracking link. Please use the driver link sent by BroDrive.');
+    st.booking = j.booking; st.km = j.km || 0; st.tripKm = j.tripKm || 0; st.tripStatus = j.booking.tripStatus; st.status = j.booking.status;
+    pickGeo = T.geo(j.booking.pickupGeo); dropGeo = T.geo(j.booking.dropGeo);
+    var L = window.L;
+    if (m && pickGeo) pickM = L.marker(pickGeo, { icon: T.icon('a') }).addTo(m).bindPopup('Pickup');
+    if (m && j.points.length) T.drawPath(m, layers, j.points);
+    if (!dropGeo && j.booking.destination) T.geocode(j.booking.destination).then(function (g) { dropGeo = g; if (g && m) dropM = L.marker(g, { icon: T.icon('b') }).addTo(m).bindPopup('Drop'); updateRoute(); });
+    else if (m && dropGeo) dropM = L.marker(dropGeo, { icon: T.icon('b') }).addTo(m).bindPopup('Drop');
+    if (m && pickGeo && !st.me) m.setView(pickGeo, 13);
+    setTarget(); render();
+    if (st.queue.length && !ended()) flush();
+  }).catch(function (x) {
+    app.innerHTML = '<div class="err-box">' + esc(x.message || 'Could not load this booking. Check your internet and reopen the link.') + '</div>';
+  });
+})();
+</script>
+</body>
+</html>

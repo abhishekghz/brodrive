@@ -21,6 +21,7 @@ window.BRO = {
   "disc30": 20,
   "deliveryFee": 399,
   "freeDeliveryDays": 3,
+  "commissionPct": 15,
   "cityNightPct": 25,
   "cityMaxKm": 60,
   "lateFeePerHour": 300,

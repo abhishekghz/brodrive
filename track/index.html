@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en-IN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Live Ride Tracking | BroDrive</title>
+<meta name="robots" content="noindex, nofollow">
+<meta name="theme-color" content="#0B0F17">
+<link rel="icon" href="../assets/img/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link rel="stylesheet" href="../assets/css/style.css">
+<link rel="stylesheet" href="../assets/css/track.css">
+</head>
+<body class="trk">
+<header class="trk-head">
+  <a class="brand" href="../" aria-label="BroDrive home"><svg viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="16" fill="#FFB703"/><path d="M28 15h11.5a8.5 8.5 0 0 1 0 17H28zM28 32h13.5a8.5 8.5 0 0 1 0 17H28z" fill="none" stroke="#0B0F17" stroke-width="6.5" stroke-linejoin="round"/><path d="M10 24h8M7 32h11M10 40h8" stroke="#0B0F17" stroke-width="4" stroke-linecap="round"/></svg><span class="brand-word">Bro<b>Drive</b></span></a>
+  <span class="tag">Live tracking</span>
+</header>
+<div class="trk-map" id="map"><p class="map-hint">Loading map…</p></div>
+<main class="trk-card"><div class="trk-inner" id="app"><p class="trk-sub">Loading your ride…</p></div></main>
+
+<script src="../assets/js/rates.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="../assets/js/trackmap.js"></script>
+<script>
+(function () {
+  'use strict';
+  var T = window.BroTrack, esc = T.esc, P = T.params(), app = document.getElementById('app');
+  var m = null, car = null, layers = {}, pts = [], after = 0, follow = true, fitted = false;
+  var pickGeo = null, dropGeo = null, eta = null, etaAt = 0, data = null, timer = null, serverSkew = 0;
+  try { m = T.map('map'); var h0 = document.querySelector('#map .map-hint'); if (h0) h0.remove(); m.on('dragstart zoomstart', function (e) { if (e.originalEvent || e.type === 'dragstart') follow = false; }); } catch (e) { }
+
+  var LABEL = { '': 'Waiting for your driver to start', 'Driver on the way': 'Driver is on the way', 'Driver arrived': 'Driver has arrived', 'On trip': 'On your trip', 'Trip ended': 'Trip completed' };
+  function nowS() { return Math.floor(Date.now() / 1000) + serverSkew; }
+
+  function render() {
+    var b = data.booking, last = data.last, done = b.tripStatus === 'Trip ended' || b.status === 'Completed', cancelled = b.status === 'Cancelled';
+    var age = last ? nowS() - last[0] : null, live = last && age < 90 && !done;
+    var label = cancelled ? 'Booking cancelled' : done ? 'Trip completed' : (LABEL[b.tripStatus] || b.tripStatus || LABEL['']);
+    var speed = last && live ? Math.round(last[3] || 0) + ' km/h' : '—';
+    var h = '<div class="trk-status"><span class="dot ' + (live ? 'live' : last && !done ? 'stale' : '') + '"></span><h1>' + esc(label) + '</h1></div>';
+    h += '<p class="trk-sub">' + esc(b.id) + ' · ' + esc(b.trip) + ' · ' + esc(b.start) +
+      (last ? ' · updated ' + T.ago(age) : '') + '</p>';
+    if (last && !live && !done && age > 90) h += '<p class="note warn">No signal from the car for ' + T.ago(age).replace(' ago', '') + '. The driver may be in a low-network area; the map will catch up automatically.</p>';
+    if (!last && !done && !cancelled) h += '<p class="note">Your driver’s live location will appear here once they start. Keep this page open or come back any time – the link stays the same.</p>';
+    h += '<div class="stats">' +
+      '<div class="stat"><span>Km covered</span><b>' + (Number(b.kmCovered) || data.tripKm || 0).toFixed(1) + '</b></div>' +
+      '<div class="stat"><span>Speed</span><b>' + speed + '</b></div>' +
+      '<div class="stat"><span>' + (b.tripStatus === 'On trip' ? 'Distance left' : 'Car is') + '</span><b>' + (eta ? eta.km.toFixed(1) + ' km' : '—') + '</b></div>' +
+      '<div class="stat"><span>' + (b.tripStatus === 'On trip' ? 'Arriving in' : 'Reaches you in') + '</span><b>' + (eta && !done ? T.mins(eta.sec) : '—') + '</b></div></div>';
+    if (b.vehicleNo || b.driverName) h += '<div class="who"><div><b>' + esc(b.driverName || 'Your driver') + '</b><small>' + esc(b.carName) +
+      (b.vehicleNo ? ' · <span class="reg">' + esc(b.vehicleNo) + '</span>' : '') + '</small></div>' +
+      (b.driverPhone ? '<a class="btn btn-primary btn-sm" href="tel:' + esc(b.driverPhone) + '">Call driver</a>' : '') + '</div>';
+    h += '<ul class="route-list"><li><i class="a"></i><span><b>Pickup</b><br>' + esc(b.pickup) + '</span></li>' +
+      (b.destination ? '<li><i class="b"></i><span><b>Drop</b><br>' + esc(b.destination) + '</span></li>' : '') + '</ul>';
+    var shareText = 'Track my BroDrive ride live (' + (b.vehicleNo || b.carName) + '): ' + location.href;
+    h += '<div class="acts"><button class="btn btn-wa" data-share>Share my trip with family</button>' +
+      (last ? '<a class="btn btn-ghost dark" target="_blank" rel="noopener" href="https://www.google.com/maps/search/?api=1&query=' + last[1] + ',' + last[2] + '">Car location in Google Maps</a>' : '') +
+      (!follow && last ? '<button class="btn btn-ghost dark" data-follow>Re-centre on car</button>' : '') + '</div>';
+    h += '<p class="note">Need help? Call/WhatsApp BroDrive: <b>' + esc(data.phone) + '</b></p>';
+    app.innerHTML = h;
+    var sb = app.querySelector('[data-share]');
+    sb.addEventListener('click', function () {
+      if (navigator.share) navigator.share({ title: 'My BroDrive ride', text: shareText, url: location.href }).catch(function () { });
+      else window.open('https://wa.me/?text=' + encodeURIComponent(shareText), '_blank');
+    });
+    var fb = app.querySelector('[data-follow]');
+    if (fb) fb.addEventListener('click', function () { follow = true; if (last) m.setView([last[1], last[2]], 15); render(); });
+  }
+
+  function drawMap() {
+    if (!m) return;
+    var L = window.L, last = data.last;
+    T.drawPath(m, layers, pts);
+    if (last) {
+      if (!car) car = L.marker([last[1], last[2]], { icon: T.icon('car'), keyboard: false, zIndexOffset: 500 }).addTo(m);
+      else car.setLatLng([last[1], last[2]]);
+    }
+    if (!fitted) {
+      var b = [];
+      if (last) b.push([last[1], last[2]]);
+      if (pickGeo) b.push(pickGeo);
+      if (dropGeo && (!last || data.booking.tripStatus === 'On trip')) b.push(dropGeo);
+      if (b.length > 1) m.fitBounds(b, { padding: [40, 40], maxZoom: 15 }); else if (b.length) m.setView(b[0], 14);
+      fitted = b.length > 0;
+    } else if (follow && last) m.panTo([last[1], last[2]]);
+  }
+
+  function updateEta() {
+    var b = data.booking, last = data.last;
+    if (!last || b.tripStatus === 'Trip ended' || b.status === 'Completed') { eta = null; return; }
+    var target = b.tripStatus === 'On trip' ? dropGeo : pickGeo;
+    if (!target || Date.now() - etaAt < 60000) return;
+    etaAt = Date.now();
+    T.route([last[1], last[2]], target).then(function (r) { eta = r; render(); });
+  }
+
+  function poll() {
+    T.get(P.id, P.k, after).then(function (j) {
+      if (!j.ok) throw new Error(j.error);
+      var first = !data;
+      data = j; serverSkew = j.now - Math.floor(Date.now() / 1000);
+      if (j.points.length) { pts = pts.concat(j.points); after = pts[pts.length - 1][0]; }
+      if (first) {
+        pickGeo = T.geo(j.booking.pickupGeo); dropGeo = T.geo(j.booking.dropGeo);
+        var L = window.L;
+        if (m && pickGeo) L.marker(pickGeo, { icon: T.icon('a') }).addTo(m).bindPopup('Pickup');
+        if (m && dropGeo) L.marker(dropGeo, { icon: T.icon('b') }).addTo(m).bindPopup('Drop');
+        if (!dropGeo && j.booking.destination) T.geocode(j.booking.destination).then(function (g) { dropGeo = g; if (g && m) L.marker(g, { icon: T.icon('b') }).addTo(m).bindPopup('Drop'); etaAt = 0; updateEta(); });
+      }
+      drawMap(); updateEta(); render();
+      var done = j.booking.tripStatus === 'Trip ended' || ['Completed', 'Cancelled'].indexOf(j.booking.status) >= 0;
+      if (done) clearInterval(timer);
+    }).catch(function (x) {
+      if (!data) app.innerHTML = '<div class="err-box">' + esc(x.message && x.message !== 'Failed to fetch' ? x.message : 'Can’t reach BroDrive right now. Check your internet; this page will keep trying.') + '</div>';
+    });
+  }
+  poll();
+  timer = setInterval(function () { if (!document.hidden) poll(); }, 12000);
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) poll(); });
+})();
+</script>
+</body>
+</html>

@@ -36,7 +36,7 @@ SITE = {
     "region": "Chandigarh",
     "postal": "160022",
     "lat": 30.7333, "lng": 76.7794,
-    "google_verification": "fgplibgB_P7zll76VSmptWwDQ9nSjtpIuXEACbqZx0Q",            # paste the code from Google Search Console here
+    "google_verification": "seb-bSaV6qgdpUghst8m4spOqY0KeTRJfOvw2JIDS0M,fgplibgB_P7zll76VSmptWwDQ9nSjtpIuXEACbqZx0Q",  # comma-separated: brodrive.in, old github.io            # paste the code from Google Search Console here
     "indexnow_key": "d88bc06cc741f12a40462e5b5845e098",  # public key for IndexNow (instant Bing/Yandex indexing)
     "instagram": "", "facebook": "",
 }
@@ -430,7 +430,7 @@ def page(path, title, desc, body, schemas=(), og_type="website"):
     depth = path.count("/")
     p = "./" if depth == 0 else "../" * depth
     url = SITE["base_url"] + "/" + path
-    gv = f'<meta name="google-site-verification" content="{e(SITE["google_verification"])}">' if SITE["google_verification"] else ""
+    gv = "".join(f'<meta name="google-site-verification" content="{e(c.strip())}">' for c in SITE["google_verification"].split(",") if c.strip())
     ld = "".join(f'<script type="application/ld+json">{json.dumps(s, ensure_ascii=False)}</script>' for s in [business_schema(), *schemas])
     doc = f'''<!doctype html>
 <html lang="en-IN">

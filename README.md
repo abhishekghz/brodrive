@@ -30,7 +30,7 @@ That rewrites every page, `assets/js/rates.js`, `backend/Code.gs`, `sitemap.xml`
   - you get a "New booking" email for every booking
   - the customer gets "Booking received" (when they enter an email)
   - the customer gets "Booking confirmed / cancelled / completed" whenever you choose **Save & email customer** in the admin panel
-- **Admin panel:** `/admin/` (for example https://abhishekghz.github.io/brodrive/admin/). It shows:
+- **Admin panel:** `/admin/` (for example https://brodrive.in/admin/). It shows:
   - bookings, with status, assigned vehicle number, driver, final fare and notes, plus one-tap Call/WhatsApp to the customer
   - vehicles (add, edit, hide, delete, set prices, works for cars or bikes)
   - pricing rules (minimum km, allowances, discounts, fees)
@@ -62,7 +62,7 @@ Free Gmail can send about 100 emails a day through Apps Script. That covers roug
 
 ## Partners (attach other people's cars)
 
-- Share **/partner/** (e.g. https://abhishekghz.github.io/brodrive/partner/) with car owners and drivers. They register, add their cars and rates, and upload their papers: RC, insurance, permit, PUC, fitness, licence, Aadhaar and photos. Papers are saved privately in your Google Drive, in the folder *BroDrive – Partner documents*.
+- Share **/partner/** (e.g. https://brodrive.in/partner/) with car owners and drivers. They register, add their cars and rates, and upload their papers: RC, insurance, permit, PUC, fitness, licence, Aadhaar and photos. Papers are saved privately in your Google Drive, in the folder *BroDrive – Partner documents*.
 - In the admin **Partners** tab, review the papers (expired ones are flagged), then approve the partner and each car. Approved partner cars appear in the "Assign one of my cars" list.
 - When you assign a partner car, the payout is suggested as fare minus your commission (**Pricing rules → commission %**, default 15%). The partner gets an email, and sees the ride, the customer pickup details and a Start-trip button on their dashboard.
 - Partners see only their own rides and their earnings per ride. Mark payouts **Paid** in the booking to update their dashboard.

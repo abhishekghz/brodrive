@@ -1280,5 +1280,5 @@ var DEFAULTS = {
   "refuelFee": 100
  },
  "phone": "+91 62021 23608",
- "siteUrl": "https://abhishekghz.github.io/brodrive"
+ "siteUrl": "https://brodrive.in"
 };

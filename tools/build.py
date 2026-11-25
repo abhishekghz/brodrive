@@ -24,7 +24,7 @@ SITE = {
     "name": "BroDrive",
     "tagline": "Cab service & self-drive cars in Chandigarh",
     # Live URL, no trailing slash. After moving to GoDaddy change to e.g. "https://www.brodrive.in"
-    "base_url": "https://abhishekghz.github.io/brodrive",
+    "base_url": "https://brodrive.in",
     "phone_display": "+91 62021 23608",   # shown on the site
     "phone": "+916202123608",             # used for tel: links, format +91XXXXXXXXXX
     "whatsapp": "916202123608",           # WhatsApp number, digits only with 91 prefix

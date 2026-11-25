@@ -2,4 +2,4 @@ User-agent: *
 Allow: /
 Disallow: /admin/
 
-Sitemap: https://abhishekghz.github.io/brodrive/sitemap.xml
+Sitemap: https://brodrive.in/sitemap.xml

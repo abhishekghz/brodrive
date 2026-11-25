@@ -29,7 +29,7 @@ SITE = {
     "phone": "+916202123608",             # used for tel: links, format +91XXXXXXXXXX
     "whatsapp": "916202123608",           # WhatsApp number, digits only with 91 prefix
     # Booking API (Google Apps Script web app URL, ends in /exec). Empty = bookings go to WhatsApp only.
-    "api_url": "",
+    "api_url": "https://script.google.com/macros/s/AKfycbx5F5h5NdYemh2XKxioPfUYMlMTSn68DSVLFpXfxq2nZSmlhYyvwT7_o99uAHMBH2gq/exec",
     "email": "",                          # optional, e.g. "book@brodrive.in"
     "street": "",                         # optional office address, e.g. "SCO 12, Sector 22-C"
     "city": "Chandigarh",

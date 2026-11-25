@@ -137,10 +137,44 @@
       .filter(function (x, i, a) { return x && x !== main && a.indexOf(x) === i; }).join(', ');
     return main + (sub ? ', ' + sub : '');
   }
-  function reverseGeo(lat, lng) {
+  var OLA = (B.site && B.site.ola) || '';
+  function photonReverse(lat, lng) {
     return fetch('https://photon.komoot.io/reverse?lat=' + lat + '&lon=' + lng + '&lang=en').then(function (r) { return r.json(); })
-      .then(function (j) { return j.features && j.features[0] ? placeName(j.features[0]) : 'Pinned location'; })
+      .then(function (j) { return j.features && j.features[0] ? placeName(j.features[0]) : 'Pinned location'; });
+  }
+  function shortAddr(a) { return String(a || '').replace(/, India$/, '').replace(/, \d{6}(?=,|$)/, ''); }
+  function reverseGeo(lat, lng) {
+    var ola = OLA ? fetch('https://api.olamaps.io/places/v1/reverse-geocode?latlng=' + lat + ',' + lng + '&api_key=' + OLA)
+      .then(function (r) { if (!r.ok) throw new Error('ola ' + r.status); return r.json(); })
+      .then(function (j) { var a = j.results && j.results[0] && j.results[0].formatted_address; if (!a) throw new Error('none'); return shortAddr(a); })
+      : Promise.reject(new Error('no key'));
+    return ola.catch(function () { return photonReverse(lat, lng); })
       .catch(function () { return 'Pinned location (' + lat.toFixed(4) + ', ' + lng.toFixed(4) + ')'; });
+  }
+  /* Place search: Ola Maps (Indian shops, societies, SCOs) first, OpenStreetMap as backup. Only tricity results. */
+  function olaSuggest(text) {
+    if (!OLA) return Promise.reject(new Error('no key'));
+    return fetch('https://api.olamaps.io/places/v1/autocomplete?input=' + encodeURIComponent(text) + '&location=' + CITY.lat + ',' + CITY.lng + '&radius=40000&api_key=' + OLA)
+      .then(function (r) { if (!r.ok) throw new Error('ola ' + r.status); return r.json(); })
+      .then(function (j) {
+        return (j.predictions || []).filter(function (p) { var g = p.geometry && p.geometry.location; return g && inBox(g.lat, g.lng); }).map(function (p) {
+          var g = p.geometry.location, sf = p.structured_formatting || {};
+          return { main: sf.main_text || p.description, sub: shortAddr(sf.secondary_text || ''), lat: g.lat, lng: g.lng, label: shortAddr(p.description) };
+        });
+      });
+  }
+  function photonSuggest(text) {
+    return fetch('https://photon.komoot.io/api/?q=' + encodeURIComponent(text) + '&limit=6&lang=en&lat=' + CITY.lat + '&lon=' + CITY.lng + '&bbox=' + CITY.box.join(','))
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        return (j.features || []).filter(function (ft) { var c = ft.geometry.coordinates; return inBox(c[1], c[0]); }).map(function (ft) {
+          var c = ft.geometry.coordinates, n = placeName(ft).split(', '), main = n.shift();
+          return { main: main, sub: n.join(', '), lat: c[1], lng: c[0], label: placeName(ft) };
+        });
+      });
+  }
+  function searchPlaces(text) {
+    return olaSuggest(text).then(function (r) { return r.length ? r : photonSuggest(text); }).catch(function () { return photonSuggest(text); });
   }
 
   function initCity(root, f) {
@@ -244,23 +278,20 @@
         t = setTimeout(function () {
           var text = e[k].value.trim(), id = ++q;
           if (text.length < 3) { list.innerHTML = ''; return; }
-          fetch('https://photon.komoot.io/api/?q=' + encodeURIComponent(text) + '&limit=6&lang=en&lat=' + CITY.lat + '&lon=' + CITY.lng + '&bbox=' + CITY.box.join(','))
-            .then(function (r) { return r.json(); })
-            .then(function (j) {
+          searchPlaces(text).then(function (items) {
               if (id !== q) return;
-              var items = (j.features || []).filter(function (ft) { var c = ft.geometry.coordinates; return inBox(c[1], c[0]); });
+              items = items.slice(0, 7);
               list._items = items;
-              list.innerHTML = items.length ? items.map(function (ft, i) {
-                var n = placeName(ft).split(', '), main = n.shift();
-                return '<li role="option" data-i="' + i + '">' + esc(main) + (n.length ? '<small>' + esc(n.join(', ')) + '</small>' : '') + '</li>';
-              }).join('') : '<li aria-disabled="true"><small>No matches in the tricity – try a nearby landmark or tap the map</small></li>';
+              list.innerHTML = items.length ? items.map(function (it, i) {
+                return '<li role="option" data-i="' + i + '">' + esc(it.main) + (it.sub ? '<small>' + esc(it.sub) + '</small>' : '') + '</li>';
+              }).join('') : '<li aria-disabled="true"><small>No matches in the tricity \u2013 try a nearby landmark or tap the map</small></li>';
             }).catch(function () { list.innerHTML = ''; });
-        }, 350);
+        }, OLA ? 250 : 350);
       });
       list.addEventListener('click', function (ev) {
         var li = ev.target.closest('li[data-i]'); if (!li) return;
-        var ft = list._items[+li.getAttribute('data-i')], c = ft.geometry.coordinates;
-        list.innerHTML = ''; ensureMap(); setPoint(k, c[1], c[0], placeName(ft));
+        var it = list._items[+li.getAttribute('data-i')];
+        list.innerHTML = ''; ensureMap(); setPoint(k, it.lat, it.lng, it.label);
       });
       e[k].addEventListener('blur', function () { setTimeout(function () { list.innerHTML = ''; }, 250); });
     });

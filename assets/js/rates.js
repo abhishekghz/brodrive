@@ -3,7 +3,8 @@ window.BRO = {
  "site": {
   "whatsapp": "916202123608",
   "phone": "+916202123608",
-  "api": "https://script.google.com/macros/s/AKfycbx5F5h5NdYemh2XKxioPfUYMlMTSn68DSVLFpXfxq2nZSmlhYyvwT7_o99uAHMBH2gq/exec"
+  "api": "https://script.google.com/macros/s/AKfycbx5F5h5NdYemh2XKxioPfUYMlMTSn68DSVLFpXfxq2nZSmlhYyvwT7_o99uAHMBH2gq/exec",
+  "ola": "HJeibMCDMhGbVwnDugIWt3KmAGHlULOKjoX0yutE"
  },
  "rules": {
   "oneWayMinKm": 130,

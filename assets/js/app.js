@@ -18,6 +18,14 @@
     try { return d.toLocaleString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' }); }
     catch (e) { return d.toString(); }
   }
+  /* fetch that gives up after ms, so a slow service never leaves the page waiting */
+  function fetchT(url, opts, ms) {
+    var ctl = window.AbortController ? new AbortController() : null, timer;
+    opts = opts || {}; if (ctl) opts.signal = ctl.signal;
+    return Promise.race([fetch(url, opts), new Promise(function (_, rej) {
+      timer = setTimeout(function () { if (ctl) ctl.abort(); rej(new Error('timeout')); }, ms || 8000);
+    })]).then(function (r) { clearTimeout(timer); return r; }, function (e) { clearTimeout(timer); throw e; });
+  }
   function store(k, v) { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) { return null; } }
 
   /* ---------- Mobile nav ---------- */
@@ -77,14 +85,16 @@
     if (!API) { openWhatsApp(waMsg); return; }
     btn.disabled = true; var label = btn.innerHTML; btn.textContent = 'Booking…';
     payload.action = 'book';
-    fetch(API, { method: 'POST', body: JSON.stringify(payload) })
+    fetchT(API, { method: 'POST', body: JSON.stringify(payload) }, 30000)
       .then(function (r) { return r.json(); })
       .then(function (j) {
         if (!j.ok) throw new Error(j.error || 'Booking failed');
         showDone(form, j, payload, waMsg, summary);
       })
       .catch(function (x) {
-        err.innerHTML = esc(x.message && x.message !== 'Failed to fetch' ? x.message : 'We couldn’t reach the booking server.') +
+        var why = x.message === 'timeout' ? 'The booking server is slow right now. Please wait a minute before trying again (your booking may still arrive).'
+          : x.message && x.message !== 'Failed to fetch' ? x.message : 'We couldn\u2019t reach the booking server.';
+        err.innerHTML = esc(why) +
           ' <button type="button" class="linkish" data-wa-fallback>Send on WhatsApp instead</button>';
         $('[data-wa-fallback]', err).addEventListener('click', function () { openWhatsApp(waMsg); });
       })
@@ -139,12 +149,12 @@
   }
   var OLA = (B.site && B.site.ola) || '';
   function photonReverse(lat, lng) {
-    return fetch('https://photon.komoot.io/reverse?lat=' + lat + '&lon=' + lng + '&lang=en').then(function (r) { return r.json(); })
+    return fetchT('https://photon.komoot.io/reverse?lat=' + lat + '&lon=' + lng + '&lang=en', {}, 6000).then(function (r) { return r.json(); })
       .then(function (j) { return j.features && j.features[0] ? placeName(j.features[0]) : 'Pinned location'; });
   }
   function shortAddr(a) { return String(a || '').replace(/, India$/, '').replace(/, \d{6}(?=,|$)/, ''); }
   function reverseGeo(lat, lng) {
-    var ola = OLA ? fetch('https://api.olamaps.io/places/v1/reverse-geocode?latlng=' + lat + ',' + lng + '&api_key=' + OLA)
+    var ola = OLA ? fetchT('https://api.olamaps.io/places/v1/reverse-geocode?latlng=' + lat + ',' + lng + '&api_key=' + OLA, {}, 6000)
       .then(function (r) { if (!r.ok) throw new Error('ola ' + r.status); return r.json(); })
       .then(function (j) { var a = j.results && j.results[0] && j.results[0].formatted_address; if (!a) throw new Error('none'); return shortAddr(a); })
       : Promise.reject(new Error('no key'));
@@ -154,7 +164,7 @@
   /* Place search: Ola Maps (Indian shops, societies, SCOs) first, OpenStreetMap as backup. Only tricity results. */
   function olaSuggest(text) {
     if (!OLA) return Promise.reject(new Error('no key'));
-    return fetch('https://api.olamaps.io/places/v1/autocomplete?input=' + encodeURIComponent(text) + '&location=' + CITY.lat + ',' + CITY.lng + '&radius=40000&api_key=' + OLA)
+    return fetchT('https://api.olamaps.io/places/v1/autocomplete?input=' + encodeURIComponent(text) + '&location=' + CITY.lat + ',' + CITY.lng + '&radius=40000&api_key=' + OLA, {}, 6000)
       .then(function (r) { if (!r.ok) throw new Error('ola ' + r.status); return r.json(); })
       .then(function (j) {
         return (j.predictions || []).filter(function (p) { var g = p.geometry && p.geometry.location; return g && inBox(g.lat, g.lng); }).map(function (p) {
@@ -164,7 +174,7 @@
       });
   }
   function photonSuggest(text) {
-    return fetch('https://photon.komoot.io/api/?q=' + encodeURIComponent(text) + '&limit=6&lang=en&lat=' + CITY.lat + '&lon=' + CITY.lng + '&bbox=' + CITY.box.join(','))
+    return fetchT('https://photon.komoot.io/api/?q=' + encodeURIComponent(text) + '&limit=6&lang=en&lat=' + CITY.lat + '&lon=' + CITY.lng + '&bbox=' + CITY.box.join(','), {}, 6000)
       .then(function (r) { return r.json(); })
       .then(function (j) {
         return (j.features || []).filter(function (ft) { var c = ft.geometry.coordinates; return inBox(c[1], c[0]); }).map(function (ft) {
@@ -173,8 +183,42 @@
         });
       });
   }
+  var SEARCHED = {};
   function searchPlaces(text) {
-    return olaSuggest(text).then(function (r) { return r.length ? r : photonSuggest(text); }).catch(function () { return photonSuggest(text); });
+    var key = text.toLowerCase();
+    if (SEARCHED[key]) return Promise.resolve(SEARCHED[key]);
+    return olaSuggest(text).then(function (r) { return r.length ? r : photonSuggest(text); }).catch(function () { return photonSuggest(text); })
+      .then(function (r) { SEARCHED[key] = r; return r; });
+  }
+  /* Road distance + route line: Ola Maps, then OSRM, else null (the straight-line estimate stays) */
+  function decodePolyline(str) {
+    var i = 0, lat = 0, lng = 0, out = [];
+    while (i < str.length) {
+      var b, sh = 0, r = 0;
+      do { b = str.charCodeAt(i++) - 63; r |= (b & 31) << sh; sh += 5; } while (b >= 32);
+      lat += (r & 1) ? ~(r >> 1) : (r >> 1); sh = 0; r = 0;
+      do { b = str.charCodeAt(i++) - 63; r |= (b & 31) << sh; sh += 5; } while (b >= 32);
+      lng += (r & 1) ? ~(r >> 1) : (r >> 1);
+      out.push([lat / 1e5, lng / 1e5]);
+    }
+    return out;
+  }
+  function roadRoute(a, b) {
+    var ola = OLA ? fetchT('https://api.olamaps.io/routing/v1/directions?origin=' + a.lat + ',' + a.lng + '&destination=' + b.lat + ',' + b.lng + '&api_key=' + OLA, { method: 'POST' }, 6000)
+      .then(function (r) { if (!r.ok) throw new Error('ola ' + r.status); return r.json(); })
+      .then(function (j) {
+        var rt = j.routes && j.routes[0], lg = rt && rt.legs && rt.legs[0];
+        if (!lg || !lg.distance) throw new Error('no route');
+        return { km: lg.distance / 1000, sec: lg.duration, coords: rt.overview_polyline ? decodePolyline(rt.overview_polyline) : [] };
+      }) : Promise.reject(new Error('no key'));
+    return ola.catch(function () {
+      return fetchT('https://router.project-osrm.org/route/v1/driving/' + a.lng + ',' + a.lat + ';' + b.lng + ',' + b.lat + '?overview=simplified&geometries=geojson', {}, 6000)
+        .then(function (r) { return r.json(); })
+        .then(function (j) {
+          var r0 = j.routes && j.routes[0]; if (!r0) throw new Error('no route');
+          return { km: r0.distance / 1000, sec: r0.duration, coords: r0.geometry.coordinates.map(function (c) { return [c[1], c[0]]; }) };
+        });
+    }).catch(function () { return null; });
   }
 
   function initCity(root, f) {
@@ -237,14 +281,12 @@
       var id = ++seq, a = pts.pickup, b = pts.drop;
       routeKm = Math.max(1, Math.round(hav([a.lat, a.lng], [b.lat, b.lng]) * 13.5) / 10); // provisional: straight line x1.35
       calc();
-      fetch('https://router.project-osrm.org/route/v1/driving/' + a.lng + ',' + a.lat + ';' + b.lng + ',' + b.lat + '?overview=simplified&geometries=geojson')
-        .then(function (r) { return r.json(); })
-        .then(function (j) {
-          if (id !== seq || !j.routes || !j.routes[0]) return;
-          routeKm = Math.max(1, Math.round(j.routes[0].distance / 100) / 10);
-          if (map) line = window.L.geoJSON(j.routes[0].geometry, { style: { color: '#0B0F17', weight: 4, opacity: 0.75 } }).addTo(map);
-          calc();
-        }).catch(function () { /* keep the straight-line estimate */ });
+      roadRoute(a, b).then(function (rt) {
+        if (id !== seq || !rt) return; // no road route: the straight-line estimate stays
+        routeKm = Math.max(1, Math.round(rt.km * 10) / 10);
+        if (map && rt.coords.length > 1) line = window.L.polyline(rt.coords, { color: '#0B0F17', weight: 4, opacity: 0.75 }).addTo(map);
+        calc();
+      });
     }
     function setPoint(k, lat, lng, label) {
       if (!inBox(lat, lng)) { showErr('That spot is outside the tricity. For trips beyond Chandigarh, Mohali, Panchkula & Zirakpur, use the Outstation tab.'); return; }
@@ -341,8 +383,14 @@
     root._renderRides = renderRides;
     renderRides();
     if (!f.hidden) {
-      var go = function () { setTimeout(ensureMap, 400); };
-      if (document.readyState === 'complete') go(); else window.addEventListener('load', go);
+      var go = function () { setTimeout(ensureMap, 200); };
+      var whenLoaded = function () { if (document.readyState === 'complete') go(); else window.addEventListener('load', go); };
+      if ('IntersectionObserver' in window) {
+        var io = new IntersectionObserver(function (en) {
+          if (en.some(function (x) { return x.isIntersecting; })) { io.disconnect(); whenLoaded(); }
+        }, { rootMargin: '300px' });
+        io.observe(mapEl);
+      } else whenLoaded();
     }
   }
 
@@ -529,11 +577,19 @@
     });
   }
   if (API) {
-    try { var cached = JSON.parse(store('bro_catalog') || 'null'); if (cached && Date.now() - cached.t < 6e5) applyCatalog(cached.c); } catch (e) { }
-    fetch(API + '?action=catalog').then(function (r) { return r.json(); }).then(function (c) {
-      applyCatalog(c);
-      store('bro_catalog', JSON.stringify({ t: Date.now(), c: c }));
-    }).catch(function () { /* keep built-in prices */ });
+    // Prices are built into the page. Ask the booking system for live prices only once someone starts
+    // using a booking form (not on every page view), and remember them for 30 minutes.
+    var fresh = false;
+    try { var cached = JSON.parse(store('bro_catalog') || 'null'); if (cached && Date.now() - cached.t < 18e5) { applyCatalog(cached.c); fresh = true; } } catch (e) { }
+    var loadCatalog = function () {
+      if (fresh) return; fresh = true;
+      fetchT(API + '?action=catalog', {}, 15000).then(function (r) { return r.json(); }).then(function (c) {
+        applyCatalog(c); store('bro_catalog', JSON.stringify({ t: Date.now(), c: c }));
+      }).catch(function () { fresh = false; /* keep built-in prices */ });
+    };
+    widgets.forEach(function (w) {
+      ['pointerdown', 'focusin', 'keydown'].forEach(function (ev) { w.addEventListener(ev, loadCatalog, { passive: true }); });
+    });
   }
 
   $$('[data-year]').forEach(function (el) { el.textContent = new Date().getFullYear(); });

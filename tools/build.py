@@ -427,7 +427,21 @@ def cta(p, title="Ready to roll, bro?", text="Get an instant fare and confirm on
   <div class="btns"><a class="btn btn-dark" href="#book">Get fare</a><a class="btn btn-wa" href="{wa()}" rel="noopener">{ICONS["wa"]}WhatsApp</a><a class="btn btn-ghost" href="{tel()}">{ICONS["phone"]}Call 24×7</a></div>
 </div></div></section>'''
 
+def _version():
+    """Short hash of the site's code + prices: changes whenever either changes, so visitors never mix old and new files."""
+    import hashlib
+    h = hashlib.sha1(json.dumps([CAB_CARS, SELF_CARS, RULES, SITE], sort_keys=True, default=str).encode())
+    for d in ("assets/css", "assets/js"):
+        for fn in sorted(os.listdir(os.path.join(ROOT, d))):
+            if fn != "rates.js":
+                h.update(open(os.path.join(ROOT, d, fn), "rb").read())
+    return h.hexdigest()[:8]
+
+VER = None
+
 def page(path, title, desc, body, schemas=(), og_type="website"):
+    global VER
+    VER = VER or _version()
     depth = path.count("/")
     p = "./" if depth == 0 else "../" * depth
     url = SITE["base_url"] + "/" + path
@@ -450,9 +464,9 @@ def page(path, title, desc, body, schemas=(), og_type="website"):
 <meta name="theme-color" content="#0B0F17">
 <link rel="icon" href="{p}assets/img/favicon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="{p}assets/img/apple-touch-icon.png">
-<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="{p}assets/css/style.css">
+<link rel="preload" href="{p}assets/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="{p}assets/fonts/outfit-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="{p}assets/css/style.css?v={VER}">
 {ld}
 </head>
 <body>
@@ -462,9 +476,9 @@ def page(path, title, desc, body, schemas=(), og_type="website"):
 {body(p)}
 </main>
 {footer(p)}
-<script src="{p}assets/js/rates.js"></script>
-<script src="{p}assets/js/fare.js"></script>
-<script src="{p}assets/js/app.js" defer></script>
+<script src="{p}assets/js/rates.js?v={VER}" defer></script>
+<script src="{p}assets/js/fare.js?v={VER}" defer></script>
+<script src="{p}assets/js/app.js?v={VER}" defer></script>
 </body>
 </html>
 '''
@@ -1083,6 +1097,17 @@ def build_404():
     os.remove(os.path.join(ROOT, "404", "index.html")); os.rmdir(os.path.join(ROOT, "404"))
     PAGES.remove("404/")
 
+def version_static_pages():
+    """Hand-written pages (admin, partner, tracking): drop Google Fonts, add the same ?v= to their CSS/JS."""
+    ver = VER or _version()
+    for rel in ("admin/index.html", "partner/index.html", "track/index.html", "drive/index.html"):
+        fp = os.path.join(ROOT, rel)
+        s = open(fp, encoding="utf-8").read()
+        s = re.sub(r'<link rel="preconnect" href="https://fonts\.googleapis\.com"><link rel="preconnect" href="https://fonts\.gstatic\.com" crossorigin>\n?', "", s)
+        s = re.sub(r'<link href="https://fonts\.googleapis\.com/css2\?[^"]*" rel="stylesheet">\n?', "", s)
+        s = re.sub(r'(\.\./assets/(?:css|js)/[\w.-]+?\.(?:css|js))(?:\?v=[0-9a-f]+)?"', lambda m: m.group(1) + "?v=" + ver + '"', s)
+        open(fp, "w", encoding="utf-8").write(s)
+
 def build_assets():
     data = {"site": {"whatsapp": SITE["whatsapp"], "phone": SITE["phone"], "api": SITE["api_url"], "ola": SITE.get("ola_maps_key", "")},
             "rules": RULES, "cab": CAB_CARS, "self": SELF_CARS}
@@ -1117,5 +1142,5 @@ if __name__ == "__main__":
     for c in CITIES: build_city(c)
     for r in ROUTES: build_route(r)
     for sv in SERVICES: build_service(sv)
-    build_terms(); build_404(); build_assets(); build_backend()
+    build_terms(); build_404(); build_assets(); build_backend(); version_static_pages()
     print(f"Built {len(PAGES)} pages + 404.html, sitemap.xml, robots.txt, assets/js/rates.js")

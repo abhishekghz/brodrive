@@ -40,18 +40,46 @@ window.BroTrack = (function () {
       .then(function (j) { var f = j.features && j.features[0]; return f ? [f.geometry.coordinates[1], f.geometry.coordinates[0]] : null; })
       .catch(function () { return null; });
   }
+  function fetchT(url, opts, ms) {
+    var ctl = window.AbortController ? new AbortController() : null, timer;
+    opts = opts || {}; if (ctl) opts.signal = ctl.signal;
+    return Promise.race([fetch(url, opts), new Promise(function (_, rej) { timer = setTimeout(function () { if (ctl) ctl.abort(); rej(new Error('timeout')); }, ms || 8000); })])
+      .then(function (r) { clearTimeout(timer); return r; }, function (e) { clearTimeout(timer); throw e; });
+  }
+  function decode(str) {
+    var i = 0, lat = 0, lng = 0, out = [];
+    while (i < str.length) {
+      var b, sh = 0, r = 0;
+      do { b = str.charCodeAt(i++) - 63; r |= (b & 31) << sh; sh += 5; } while (b >= 32);
+      lat += (r & 1) ? ~(r >> 1) : (r >> 1); sh = 0; r = 0;
+      do { b = str.charCodeAt(i++) - 63; r |= (b & 31) << sh; sh += 5; } while (b >= 32);
+      lng += (r & 1) ? ~(r >> 1) : (r >> 1);
+      out.push([lng / 1e5, lat / 1e5]);
+    }
+    return out;
+  }
+  /* Road route [lat,lng] -> [lat,lng]: Ola Maps first, then OSRM; null if both fail */
   function route(a, b) {
-    return fetch('https://router.project-osrm.org/route/v1/driving/' + a[1] + ',' + a[0] + ';' + b[1] + ',' + b[0] + '?overview=simplified&geometries=geojson')
-      .then(function (r) { return r.json(); })
-      .then(function (j) { var r0 = j.routes && j.routes[0]; return r0 ? { km: r0.distance / 1000, sec: r0.duration, geometry: r0.geometry } : null; })
-      .catch(function () { return null; });
+    var key = (B.site && B.site.ola) || '';
+    var ola = key ? fetchT('https://api.olamaps.io/routing/v1/directions?origin=' + a[0] + ',' + a[1] + '&destination=' + b[0] + ',' + b[1] + '&api_key=' + key, { method: 'POST' }, 6000)
+      .then(function (r) { if (!r.ok) throw new Error('ola'); return r.json(); })
+      .then(function (j) {
+        var rt = j.routes && j.routes[0], lg = rt && rt.legs && rt.legs[0];
+        if (!lg || !lg.distance) throw new Error('no route');
+        return { km: lg.distance / 1000, sec: lg.duration, geometry: { type: 'LineString', coordinates: rt.overview_polyline ? decode(rt.overview_polyline) : [] } };
+      }) : Promise.reject(new Error('no key'));
+    return ola.catch(function () {
+      return fetchT('https://router.project-osrm.org/route/v1/driving/' + a[1] + ',' + a[0] + ';' + b[1] + ',' + b[0] + '?overview=simplified&geometries=geojson', {}, 6000)
+        .then(function (r) { return r.json(); })
+        .then(function (j) { var r0 = j.routes && j.routes[0]; return r0 ? { km: r0.distance / 1000, sec: r0.duration, geometry: r0.geometry } : null; });
+    }).catch(function () { return null; });
   }
   function get(id, k, after) {
-    return fetch(API + '?action=track&id=' + encodeURIComponent(id) + '&k=' + encodeURIComponent(k) + '&after=' + (after || 0))
+    return fetchT(API + '?action=track&id=' + encodeURIComponent(id) + '&k=' + encodeURIComponent(k) + '&after=' + (after || 0), {}, 15000)
       .then(function (r) { return r.json(); });
   }
   function post(data) {
-    return fetch(API, { method: 'POST', body: JSON.stringify(data) }).then(function (r) { return r.json(); });
+    return fetchT(API, { method: 'POST', body: JSON.stringify(data) }, 20000).then(function (r) { return r.json(); });
   }
   function loadLeaflet() {
     if (window.L) return Promise.resolve(window.L);

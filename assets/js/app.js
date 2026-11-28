@@ -28,6 +28,33 @@
   }
   function store(k, v) { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) { return null; } }
 
+  /* ---------- Where did this visitor come from? (?ref=facebook links, or the site that linked here). Kept 30 days, sent with the booking. ---------- */
+  var SOURCE = (function () {
+    try {
+      var q = new URLSearchParams(location.search), r = q.get('ref') || q.get('utm_source'), saved = JSON.parse(store('bro_src') || 'null');
+      if (r) saved = { s: r.replace(/[^\w .-]/g, '').slice(0, 40), t: Date.now() };
+      else if (!saved && document.referrer) {
+        var h = new URL(document.referrer).host.replace(/^www\./, '');
+        if (h && h !== location.host) saved = { s: h, t: Date.now() };
+      }
+      if (saved && Date.now() - saved.t < 30 * 864e5) { store('bro_src', JSON.stringify(saved)); return saved.s; }
+    } catch (e) { }
+    return '';
+  })();
+
+  /* ---------- Share BroDrive (phone share sheet, else WhatsApp) ---------- */
+  var SHARE_TEXT = 'BroDrive \u2013 cabs, outstation taxis & self-drive cars in Chandigarh, Mohali & Panchkula. Instant fare & booking:';
+  function shareSite(text, url) {
+    url = url || 'https://brodrive.in/?ref=share';
+    if (navigator.share) { navigator.share({ title: 'BroDrive', text: text || SHARE_TEXT, url: url }).catch(function () { }); return; }
+    var wa = 'https://wa.me/?text=' + encodeURIComponent((text || SHARE_TEXT) + ' ' + url);
+    var w = window.open(wa, '_blank', 'noopener'); if (!w) location.href = wa;
+  }
+  document.addEventListener('click', function (ev) {
+    var a = ev.target.closest && ev.target.closest('[data-share]'); if (!a) return;
+    ev.preventDefault(); shareSite(a.getAttribute('data-share-text') || '', a.getAttribute('data-share-url') || '');
+  });
+
   /* ---------- Mobile nav ---------- */
   var tgl = $('.nav-toggle');
   if (tgl) {
@@ -85,6 +112,7 @@
     if (!API) { openWhatsApp(waMsg); return; }
     btn.disabled = true; var label = btn.innerHTML; btn.textContent = 'Booking…';
     payload.action = 'book';
+    if (SOURCE) payload.source = SOURCE;
     fetchT(API, { method: 'POST', body: JSON.stringify(payload) }, 30000)
       .then(function (r) { return r.json(); })
       .then(function (j) {
@@ -111,7 +139,8 @@
       '<ul class="est-lines">' + summary.map(function (s) { return '<li><span>' + esc(s[0]) + '</span><span>' + esc(s[1]) + '</span></li>'; }).join('') +
       '<li><span>Estimated fare</span><span><b>' + inr(j.total) + '</b></span></li></ul>' +
       '<div class="book-actions"><a class="btn btn-wa" target="_blank" rel="noopener" href="https://wa.me/' + B.site.whatsapp + '?text=' +
-      encodeURIComponent('Hi BroDrive! My booking ID is ' + j.id + '.') + '">WhatsApp us</a><button type="button" class="btn btn-ghost" data-again>New booking</button></div>';
+      encodeURIComponent('Hi BroDrive! My booking ID is ' + j.id + '.') + '">WhatsApp us</a><button type="button" class="btn btn-ghost" data-again>New booking</button></div>' +
+      '<p class="share-line">Know someone who travels? <a href="https://wa.me/?text=' + encodeURIComponent(SHARE_TEXT + ' https://brodrive.in/?ref=share') + '" data-share>Share BroDrive with a friend</a></p>';
     form.hidden = true;
     form.parentNode.insertBefore(done, form.nextSibling);
     var tabs = $('.book-tabs', form.parentNode); if (tabs) tabs.classList.add('is-hidden');

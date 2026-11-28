@@ -18,7 +18,7 @@ var STATUSES = ['New', 'Confirmed', 'Ongoing', 'Completed', 'Cancelled'];
 var B_COLS = ['id', 'created', 'status', 'service', 'trip', 'pickup', 'address', 'destination', 'km', 'start', 'when', 'end', 'days',
   'carId', 'carName', 'estimate', 'fareDetail', 'name', 'mobile', 'email', 'notes',
   'vehicleNo', 'driverName', 'driverPhone', 'finalFare', 'adminNotes', 'updated', 'history', 'until', 'pickupGeo', 'dropGeo',
-  'trackToken', 'driverToken', 'tripStatus', 'kmCovered', 'startedAt', 'endedAt', 'partnerId', 'partnerPayout', 'payoutStatus'];
+  'trackToken', 'driverToken', 'tripStatus', 'kmCovered', 'startedAt', 'endedAt', 'partnerId', 'partnerPayout', 'payoutStatus', 'source'];
 var T_COLS = ['id', 'ts', 'lat', 'lng', 'acc', 'spd', 'phase']; // GPS points, one sheet per month: "Tracks yyMM"
 var V_COLS = ['type', 'id', 'name', 'models', 'seats', 'bags', 'trans', 'fuel', 'icon', 'image', 'active', 'sort',
   'km', 'da', 'hr', 'transfer', 'local4h', 'local8h', 'day', 'half', 'xkm', 'dep', 'age', 'cityBase', 'cityKm', 'cityMin'];
@@ -305,7 +305,7 @@ function book_(b) {
   var cat = catalog_(), R = cat.rules, now = new Date(), res, car;
   var rec = {
     id: newId_(now), created: stamp_(now), status: 'New', name: name, mobile: mobile, email: email,
-    address: str_(b.address, 250), notes: str_(b.notes, 400), history: stamp_(now) + ' – Booked on website',
+    address: str_(b.address, 250), notes: str_(b.notes, 400), source: str_(b.source, 60), history: stamp_(now) + ' – Booked on website',
     trackToken: tok_(), driverToken: tok_(), tripStatus: ''
   };
 
@@ -421,7 +421,8 @@ function mailOwnerNew_(rec) {
   MailApp.sendEmail({
     to: ownerEmail_(), name: 'BroDrive Website', replyTo: rec.email || undefined,
     subject: 'New booking ' + rec.id + ' – ' + rec.name + ' – ' + rec.service + ' – ' + rec.start,
-    htmlBody: wrap_('New booking received', '<p>Call the customer to confirm, then update the status in the admin panel.</p>' + rowsHtml_(rec) +
+    htmlBody: wrap_('New booking received', '<p>Call the customer to confirm, then update the status in the admin panel.</p>' +
+      (rec.source ? '<p>Came from: <b>' + esc_(rec.source) + '</b></p>' : '') + rowsHtml_(rec) +
       (rec.driverToken ? '<p style="font-size:13px;color:#5C6578">Driver tracking link (send to the driver): <a href="' + driverUrl_(rec) + '">' + driverUrl_(rec) + '</a></p>' : '') +
       '<p style="margin-top:18px"><a href="tel:+91' + rec.mobile + '" style="background:#FFB703;color:#0B0F17;padding:10px 16px;border-radius:999px;text-decoration:none;font-weight:bold">Call ' + esc_(rec.name) + '</a> &nbsp; ' +
       '<a href="https://wa.me/91' + rec.mobile + '" style="background:#1FAF54;color:#fff;padding:10px 16px;border-radius:999px;text-decoration:none;font-weight:bold">WhatsApp</a></p>')

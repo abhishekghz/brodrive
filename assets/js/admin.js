@@ -242,7 +242,7 @@
     const rows = [['Customer', `${b.name}\n${b.mobile}${b.email ? '\n' + b.email : ''}`], ['Service', b.service], ['Trip', b.trip],
       ['Pickup', b.pickup], ['Address', b.address], ['Drop', b.destination ? `${b.destination}${b.km ? ' (~' + b.km + ' km)' : ''}` : (b.service === 'Self drive' ? b.km : '')],
       ['Pickup time', b.start], ['Return', b.end], ['Car type', b.carName], ['Estimate', inr(Number(b.estimate) || 0)],
-      ['Fare breakdown', b.fareDetail], ['Customer notes', b.notes]];
+      ['Fare breakdown', b.fareDetail], ['Customer notes', b.notes], ['Came from', b.source]];
     $('[data-b-details]').innerHTML = rows.filter(r => r[1]).map(([k, v]) => `<dt>${k}</dt><dd>${esc(v).replace(/\n/g, '<br>')}</dd>`).join('');
     FIELDS_B.forEach(k => { bf[k].value = b[k] ?? ''; });
     if (!bf.payoutStatus.value) bf.payoutStatus.value = 'Pending';

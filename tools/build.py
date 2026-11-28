@@ -12,7 +12,7 @@ After editing, run from the repo root:
 It rewrites every .html page, assets/js/rates.js, sitemap.xml and robots.txt.
 No packages needed – plain Python 3.
 """
-import json, os, html, datetime, re
+import json, os, html, datetime, re, urllib.parse
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TODAY = datetime.date.today().isoformat()
@@ -238,6 +238,8 @@ def footer(p):
         contact.append(f'<li><a href="mailto:{SITE["email"]}">{e(SITE["email"])}</a></li>')
     addr = ", ".join(x for x in [SITE["street"], SITE["city"]] if x)
     contact.append(f"<li>{e(addr)}</li><li>Open 24 hours, 7 days</li>")
+    share_txt = "BroDrive – cabs, outstation taxis & self-drive cars in Chandigarh, Mohali & Panchkula. Instant fare & booking: https://brodrive.in/?ref=share"
+    contact.append(f'<li><a href="https://wa.me/?text={urllib.parse.quote(share_txt)}" data-share rel="noopener">Share BroDrive with a friend</a></li>')
     return f'''<footer class="site-footer" id="contact"><div class="container">
   <div class="ft-grid">
     <div class="ft-brand"><a class="brand" href="{p}" aria-label="BroDrive home">{MARK}<span class="brand-word">Bro<b>Drive</b></span></a>
